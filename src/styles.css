@@ -596,6 +596,12 @@ select:disabled {
   font-weight: 700;
 }
 
+.inline-hint {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-weight: 700;
+}
+
 .work-share-preview {
   border: 1px solid #dbe3ef;
   border-radius: 8px;

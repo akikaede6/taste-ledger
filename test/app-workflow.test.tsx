@@ -133,6 +133,60 @@ describe("app workflow", () => {
     });
   });
 
+  it("exports ranking share images in the displayed order", async () => {
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "本地个人评分工具" });
+
+    fireEvent.change(screen.getByLabelText("新分类"), {
+      target: { value: "影视作品" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await screen.findByRole("button", { name: /影视作品/ });
+
+    await createScoredWork("作品 A", 8);
+    await createScoredWork("作品 B", 10);
+
+    fireEvent.click(screen.getByRole("button", { name: "创建排行" }));
+    await screen.findByRole("button", { name: /从夯到拉/ });
+
+    await waitFor(() => {
+      const rows = within(screen.getByLabelText("排行作品")).getAllByRole(
+        "listitem",
+      );
+      expect(rows[0]).toHaveTextContent("作品 B");
+      expect(rows[1]).toHaveTextContent("作品 A");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "导出排行长图" }));
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /已导出：exports\/rankings\/[^/]+-long-\d+\.svg/,
+      );
+    });
+  });
+
+  it("prevents empty ranking share exports", async () => {
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "本地个人评分工具" });
+
+    fireEvent.change(screen.getByLabelText("新分类"), {
+      target: { value: "影视作品" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await screen.findByRole("button", { name: /影视作品/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "创建排行" }));
+
+    expect(
+      await screen.findByRole("button", { name: "导出排行长图" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("先添加作品，再导出排行长图。"),
+    ).toBeInTheDocument();
+  });
+
   it("exports work share images into the data directory", async () => {
     render(<App />);
 

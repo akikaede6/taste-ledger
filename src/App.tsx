@@ -246,6 +246,16 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     }
   }
 
+  async function handleExportRankingShare() {
+    const exportPath = await runAction(async () =>
+      controller.exportSelectedRankingShare(),
+    );
+
+    if (exportPath) {
+      setActionMessage(`已导出：${exportPath}`);
+    }
+  }
+
   async function handleCreateRanking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -682,6 +692,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                     onSave={handleSaveRanking}
                     onDelete={handleDeleteRanking}
                     onMoveWork={handleMoveRankingWork}
+                    onExport={handleExportRankingShare}
                   />
                 ) : (
                   <p className="muted">
@@ -1053,6 +1064,7 @@ interface RankingEditorProps {
   onSave(input: RankingSaveInput): Promise<void>;
   onDelete(): Promise<void>;
   onMoveWork(workId: string, direction: -1 | 1): Promise<void>;
+  onExport(): Promise<void>;
 }
 
 interface RankingDraft {
@@ -1068,6 +1080,7 @@ function RankingEditor({
   onSave,
   onDelete,
   onMoveWork,
+  onExport,
 }: RankingEditorProps) {
   const [draft, setDraft] = useState<RankingDraft>(() => ({
     name: ranking.name,
@@ -1075,6 +1088,7 @@ function RankingEditor({
     dimensionId: ranking.dimensionId ?? "",
   }));
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
   const editorDimensions = useMemo(
     () => ensureRankingDimensionOption(dimensionOptions, ranking.dimensionId),
     [dimensionOptions, ranking.dimensionId],
@@ -1109,6 +1123,19 @@ function RankingEditor({
       mode: draft.mode,
       dimensionId: draft.mode === "dimension" ? selectedDimensionId : null,
     });
+  }
+
+  async function handleExport() {
+    if (works.length === 0) {
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      await onExport();
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   return (
@@ -1192,7 +1219,20 @@ function RankingEditor({
             <Trash2 aria-hidden="true" size={16} />
             删除排行
           </button>
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => void handleExport()}
+            disabled={isExporting || works.length === 0}
+          >
+            <ImagePlus aria-hidden="true" size={16} />
+            {isExporting ? "导出中" : "导出排行长图"}
+          </button>
         </div>
+
+        {works.length === 0 ? (
+          <p className="inline-hint">先添加作品，再导出排行长图。</p>
+        ) : null}
 
         {draftError ? (
           <p className="inline-error" role="alert">
