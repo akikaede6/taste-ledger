@@ -76,7 +76,8 @@ The Android shell should support:
 - Creating `ranking-data/`, `images/`, and `exports/` with recursive directory
   creation.
 - Reading/writing UTF-8 JSON.
-- Writing imported cover images and exported PNG files as base64 content.
+- Writing imported cover images and exported share files as binary or
+  base64-friendly content.
 - Reporting permission denial as a recoverable UI error.
 
 The Android runtime now uses a Capacitor Filesystem backend under
