@@ -1,4 +1,4 @@
-import type { Category, Library, Work } from "./model";
+import type { Category, Library, RatingDimensionScore, Work } from "./model";
 import { recalculateWorkScore } from "./scoring";
 
 export interface CategoryInput {
@@ -18,6 +18,7 @@ export interface WorkUpdateInput {
   coverImagePath?: string | null;
   shortReview?: string;
   longReview?: string;
+  ratingDimensions?: RatingDimensionScore[];
 }
 
 export function createCategory(
@@ -157,6 +158,10 @@ export function updateWork(
     work.longReview = input.longReview;
   }
 
+  if (input.ratingDimensions !== undefined) {
+    work.ratingDimensions = normalizeRatingDimensions(input.ratingDimensions);
+  }
+
   const updatedWork = recalculateWorkScore({
     ...work,
     updatedAt: now,
@@ -219,4 +224,44 @@ function touchCategory(library: Library, categoryId: string, now: string) {
   if (category) {
     category.updatedAt = now;
   }
+}
+
+function normalizeRatingDimensions(
+  dimensions: RatingDimensionScore[],
+): RatingDimensionScore[] {
+  const seenIds = new Set<string>();
+
+  return dimensions.map((dimension, index) => {
+    const id = dimension.id.trim();
+    const name = dimension.name.trim();
+
+    if (id.length === 0) {
+      throw new Error(`Rating dimension ${index + 1} cannot be empty.`);
+    }
+
+    if (seenIds.has(id)) {
+      throw new Error(`Rating dimension ${index + 1} id must be unique.`);
+    }
+
+    seenIds.add(id);
+
+    if (name.length === 0) {
+      throw new Error(`Rating dimension ${index + 1} name cannot be empty.`);
+    }
+
+    if (!Number.isFinite(dimension.score) || dimension.score < 0) {
+      throw new Error(`Rating dimension ${index + 1} score must be valid.`);
+    }
+
+    if (!Number.isFinite(dimension.weight) || dimension.weight <= 0) {
+      throw new Error(`Rating dimension ${index + 1} weight must be valid.`);
+    }
+
+    return {
+      id,
+      name,
+      score: dimension.score,
+      weight: dimension.weight,
+    };
+  });
 }

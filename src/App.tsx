@@ -21,9 +21,18 @@ import {
 } from "react";
 import { sortCategoriesByRecentUpdate } from "./core/library-actions";
 import { useLibraryState } from "./core/library-store";
+import type { RatingDimensionScore, Work } from "./core/model";
 import type { LibraryRepository } from "./core/repository";
 import { createLibraryRepository } from "./core/repository";
+import { calculateFinalScore } from "./core/scoring";
 import { createRuntimeBackend } from "./platform/runtime-backend";
+
+interface WorkSaveInput {
+  title: string;
+  shortReview: string;
+  longReview: string;
+  ratingDimensions: RatingDimensionScore[];
+}
 
 export function App() {
   const [repository, setRepository] = useState<LibraryRepository | null>(null);
@@ -149,17 +158,8 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     });
   }
 
-  async function handleSaveWork(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-
-    await runAction(async () =>
-      controller.updateSelectedWork({
-        title: String(formData.get("workTitle") ?? ""),
-        shortReview: String(formData.get("shortReview") ?? ""),
-        longReview: String(formData.get("longReview") ?? ""),
-      }),
-    );
+  async function handleSaveWork(input: WorkSaveInput) {
+    await runAction(async () => controller.updateSelectedWork(input));
   }
 
   async function handleDeleteWork() {
@@ -178,20 +178,10 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     await runAction(async () => controller.deleteSelectedWork());
   }
 
-  async function handleCoverUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
+  async function handleStoreWorkCover(fileName: string, bytes: Uint8Array) {
     await runAction(async () =>
-      controller.storeSelectedWorkCover(
-        file.name,
-        new Uint8Array(await file.arrayBuffer()),
-      ),
+      controller.storeSelectedWorkCover(fileName, bytes),
     );
-    event.currentTarget.value = "";
   }
 
   return (
@@ -401,73 +391,13 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                 </div>
 
                 {selectedWork ? (
-                  <form className="detail-form" onSubmit={handleSaveWork}>
-                    <label htmlFor="work-title">作品名</label>
-                    <input
-                      key={`${selectedWork.id}-title`}
-                      id="work-title"
-                      name="workTitle"
-                      defaultValue={selectedWork.title}
-                    />
-
-                    <div className="cover-row">
-                      <div className="cover-preview">
-                        <ImagePlus aria-hidden="true" size={22} />
-                        <span>
-                          {selectedWork.coverImagePath ?? "未设置封面"}
-                        </span>
-                      </div>
-                      <label className="file-picker">
-                        <ImagePlus aria-hidden="true" size={16} />
-                        导入封面
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(event) => void handleCoverUpload(event)}
-                        />
-                      </label>
-                    </div>
-
-                    <label htmlFor="short-review">短评</label>
-                    <textarea
-                      key={`${selectedWork.id}-short`}
-                      id="short-review"
-                      name="shortReview"
-                      defaultValue={selectedWork.shortReview}
-                      rows={3}
-                    />
-
-                    <label htmlFor="long-review">长评</label>
-                    <textarea
-                      key={`${selectedWork.id}-long`}
-                      id="long-review"
-                      name="longReview"
-                      defaultValue={selectedWork.longReview}
-                      rows={8}
-                    />
-
-                    <div className="button-row">
-                      <button className="text-button primary" type="submit">
-                        <Save aria-hidden="true" size={16} />
-                        保存作品
-                      </button>
-                      <button
-                        className="text-button danger"
-                        type="button"
-                        onClick={() => void handleDeleteWork()}
-                      >
-                        <Trash2 aria-hidden="true" size={16} />
-                        删除作品
-                      </button>
-                    </div>
-
-                    <p className="score-note">
-                      <Star aria-hidden="true" size={16} />
-                      {selectedWork.finalScore === null
-                        ? "还没有评分维度。"
-                        : `最终评分 ${selectedWork.finalScore}`}
-                    </p>
-                  </form>
+                  <WorkEditor
+                    key={`${selectedWork.id}-${selectedWork.updatedAt}`}
+                    work={selectedWork}
+                    onSave={handleSaveWork}
+                    onDelete={handleDeleteWork}
+                    onCoverUpload={handleStoreWorkCover}
+                  />
                 ) : (
                   <p className="muted">
                     <BookOpen aria-hidden="true" size={16} />
@@ -483,6 +413,384 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
       </section>
     </main>
   );
+}
+
+interface WorkEditorProps {
+  work: Work;
+  onSave(input: WorkSaveInput): Promise<void>;
+  onDelete(): Promise<void>;
+  onCoverUpload(fileName: string, bytes: Uint8Array): Promise<void>;
+}
+
+interface RatingDimensionDraft {
+  id: string;
+  name: string;
+  score: string;
+  weight: string;
+}
+
+interface RatingDimensionDraftState {
+  errorMessage: string | null;
+  finalScore: number | null;
+  ratingDimensions: RatingDimensionScore[];
+}
+
+interface WorkDraft {
+  title: string;
+  shortReview: string;
+  longReview: string;
+}
+
+function WorkEditor({
+  work,
+  onSave,
+  onDelete,
+  onCoverUpload,
+}: WorkEditorProps) {
+  const [workDraft, setWorkDraft] = useState<WorkDraft>(() => ({
+    title: work.title,
+    shortReview: work.shortReview,
+    longReview: work.longReview,
+  }));
+  const [dimensionDrafts, setDimensionDrafts] = useState<
+    RatingDimensionDraft[]
+  >(() => createDimensionDrafts(work.ratingDimensions));
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  const dimensionState = useMemo(
+    () => readDimensionDrafts(dimensionDrafts),
+    [dimensionDrafts],
+  );
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (dimensionState.errorMessage) {
+      setDraftError(dimensionState.errorMessage);
+      return;
+    }
+
+    setDraftError(null);
+
+    await onSave({
+      ...workDraft,
+      ratingDimensions: dimensionState.ratingDimensions,
+    });
+  }
+
+  async function handleCoverUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    await onCoverUpload(file.name, new Uint8Array(await file.arrayBuffer()));
+    event.currentTarget.value = "";
+  }
+
+  function updateDimensionDraft(
+    id: string,
+    field: keyof Omit<RatingDimensionDraft, "id">,
+    value: string,
+  ) {
+    setDraftError(null);
+    setDimensionDrafts((current) =>
+      current.map((draft) =>
+        draft.id === id
+          ? {
+              ...draft,
+              [field]: value,
+            }
+          : draft,
+      ),
+    );
+  }
+
+  function updateWorkDraft(field: keyof WorkDraft, value: string) {
+    setWorkDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function addDimensionDraft() {
+    setDraftError(null);
+    setDimensionDrafts((current) => [
+      ...current,
+      createNewDimensionDraft(current.length),
+    ]);
+  }
+
+  function removeDimensionDraft(id: string) {
+    setDraftError(null);
+    setDimensionDrafts((current) =>
+      current.filter((dimension) => dimension.id !== id),
+    );
+  }
+
+  const scoreLabel = dimensionState.errorMessage
+    ? "评分维度需要修正后才能保存。"
+    : dimensionState.finalScore === null
+      ? "还没有评分维度。"
+      : `当前评分 ${dimensionState.finalScore}`;
+
+  return (
+    <form
+      className="detail-form"
+      noValidate
+      onSubmit={(event) => void handleSubmit(event)}
+    >
+      <label htmlFor="work-title">作品名</label>
+      <input
+        id="work-title"
+        name="workTitle"
+        value={workDraft.title}
+        onChange={(event) =>
+          updateWorkDraft("title", event.currentTarget.value)
+        }
+      />
+
+      <div className="cover-row">
+        <div className="cover-preview">
+          <ImagePlus aria-hidden="true" size={22} />
+          <span>{work.coverImagePath ?? "未设置封面"}</span>
+        </div>
+        <label className="file-picker">
+          <ImagePlus aria-hidden="true" size={16} />
+          导入封面
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(event) => void handleCoverUpload(event)}
+          />
+        </label>
+      </div>
+
+      <div className="dimension-editor">
+        <div className="dimension-header">
+          <div>
+            <h4>评分维度</h4>
+            <p className="score-note" aria-live="polite">
+              <Star aria-hidden="true" size={16} />
+              {scoreLabel}
+            </p>
+          </div>
+          <button
+            className="text-button"
+            type="button"
+            onClick={addDimensionDraft}
+          >
+            <ListPlus aria-hidden="true" size={16} />
+            添加评分维度
+          </button>
+        </div>
+
+        {dimensionDrafts.length > 0 ? (
+          <div className="dimension-list">
+            {dimensionDrafts.map((dimension, index) => {
+              const number = index + 1;
+              const nameId = `${work.id}-${dimension.id}-name`;
+              const scoreId = `${work.id}-${dimension.id}-score`;
+              const weightId = `${work.id}-${dimension.id}-weight`;
+
+              return (
+                <div className="dimension-row" key={dimension.id}>
+                  <div className="dimension-field">
+                    <label htmlFor={nameId}>维度名称 {number}</label>
+                    <input
+                      id={nameId}
+                      value={dimension.name}
+                      onChange={(event) =>
+                        updateDimensionDraft(
+                          dimension.id,
+                          "name",
+                          event.currentTarget.value,
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="dimension-field">
+                    <label htmlFor={scoreId}>评分 {number}</label>
+                    <input
+                      id={scoreId}
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={dimension.score}
+                      onChange={(event) =>
+                        updateDimensionDraft(
+                          dimension.id,
+                          "score",
+                          event.currentTarget.value,
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="dimension-field">
+                    <label htmlFor={weightId}>权重 {number}</label>
+                    <input
+                      id={weightId}
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={dimension.weight}
+                      onChange={(event) =>
+                        updateDimensionDraft(
+                          dimension.id,
+                          "weight",
+                          event.currentTarget.value,
+                        )
+                      }
+                    />
+                  </div>
+                  <button
+                    className="icon-button danger dimension-remove"
+                    type="button"
+                    aria-label={`删除评分维度 ${number}`}
+                    onClick={() => removeDimensionDraft(dimension.id)}
+                  >
+                    <Trash2 aria-hidden="true" size={16} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="muted">添加一个评分维度后可以计算最终评分。</p>
+        )}
+
+        {draftError ? (
+          <p className="inline-error" role="alert">
+            {draftError}
+          </p>
+        ) : null}
+      </div>
+
+      <label htmlFor="short-review">短评</label>
+      <textarea
+        id="short-review"
+        name="shortReview"
+        value={workDraft.shortReview}
+        onChange={(event) =>
+          updateWorkDraft("shortReview", event.currentTarget.value)
+        }
+        rows={3}
+      />
+
+      <label htmlFor="long-review">长评</label>
+      <textarea
+        id="long-review"
+        name="longReview"
+        value={workDraft.longReview}
+        onChange={(event) =>
+          updateWorkDraft("longReview", event.currentTarget.value)
+        }
+        rows={8}
+      />
+
+      <div className="button-row">
+        <button className="text-button primary" type="submit">
+          <Save aria-hidden="true" size={16} />
+          保存作品
+        </button>
+        <button
+          className="text-button danger"
+          type="button"
+          onClick={() => void onDelete()}
+        >
+          <Trash2 aria-hidden="true" size={16} />
+          删除作品
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function createDimensionDrafts(
+  ratingDimensions: RatingDimensionScore[],
+): RatingDimensionDraft[] {
+  return ratingDimensions.map((dimension) => ({
+    id: dimension.id,
+    name: dimension.name,
+    score: String(dimension.score),
+    weight: String(dimension.weight),
+  }));
+}
+
+function createNewDimensionDraft(index: number): RatingDimensionDraft {
+  return {
+    id: `dimension-${crypto.randomUUID()}`,
+    name: `维度 ${index + 1}`,
+    score: "0",
+    weight: "1",
+  };
+}
+
+function readDimensionDrafts(
+  drafts: RatingDimensionDraft[],
+): RatingDimensionDraftState {
+  const seenIds = new Set<string>();
+  const ratingDimensions: RatingDimensionScore[] = [];
+
+  for (const [index, draft] of drafts.entries()) {
+    const number = index + 1;
+    const id = draft.id.trim();
+    const name = draft.name.trim();
+    const scoreText = draft.score.trim();
+    const weightText = draft.weight.trim();
+
+    if (id.length === 0 || seenIds.has(id)) {
+      return failDimensionDraft(`评分维度 ${number} 无法保存。`);
+    }
+
+    seenIds.add(id);
+
+    if (name.length === 0) {
+      return failDimensionDraft(`评分维度 ${number} 名称不能为空。`);
+    }
+
+    if (scoreText.length === 0) {
+      return failDimensionDraft(`评分维度 ${number} 评分不能为空。`);
+    }
+
+    const score = Number(scoreText);
+
+    if (!Number.isFinite(score) || score < 0) {
+      return failDimensionDraft(`评分维度 ${number} 评分必须是非负数字。`);
+    }
+
+    if (weightText.length === 0) {
+      return failDimensionDraft(`评分维度 ${number} 权重不能为空。`);
+    }
+
+    const weight = Number(weightText);
+
+    if (!Number.isFinite(weight) || weight <= 0) {
+      return failDimensionDraft(`评分维度 ${number} 权重必须大于 0。`);
+    }
+
+    ratingDimensions.push({
+      id,
+      name,
+      score,
+      weight,
+    });
+  }
+
+  return {
+    errorMessage: null,
+    finalScore: calculateFinalScore(ratingDimensions),
+    ratingDimensions,
+  };
+}
+
+function failDimensionDraft(message: string): RatingDimensionDraftState {
+  return {
+    errorMessage: message,
+    finalScore: null,
+    ratingDimensions: [],
+  };
 }
 
 function LoadingShell({ label }: { label: string }) {

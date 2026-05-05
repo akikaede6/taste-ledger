@@ -185,6 +185,60 @@ describe("category actions", () => {
     });
   });
 
+  it("updates rating dimensions and recalculates the final score", () => {
+    vi.setSystemTime(new Date("2026-05-05T02:25:00.000Z"));
+
+    const next = updateWork(libraryWithCategory(), "work-a", {
+      ratingDimensions: [
+        {
+          id: "story",
+          name: "剧情",
+          score: 9,
+          weight: 2,
+        },
+        {
+          id: "music",
+          name: "音乐",
+          score: 8,
+          weight: 1,
+        },
+      ],
+    });
+
+    expect(next.works[0]).toMatchObject({
+      finalScore: 8.67,
+      updatedAt: "2026-05-05T02:25:00.000Z",
+    });
+  });
+
+  it("rejects invalid rating dimensions", () => {
+    expect(() =>
+      updateWork(libraryWithCategory(), "work-a", {
+        ratingDimensions: [
+          {
+            id: "story",
+            name: "剧情",
+            score: 9,
+            weight: -1,
+          },
+        ],
+      }),
+    ).toThrow("Rating dimension 1 weight must be valid.");
+
+    expect(() =>
+      updateWork(libraryWithCategory(), "work-a", {
+        ratingDimensions: [
+          {
+            id: "story",
+            name: "剧情",
+            score: Number.NaN,
+            weight: 1,
+          },
+        ],
+      }),
+    ).toThrow("Rating dimension 1 score must be valid.");
+  });
+
   it("deletes a work and removes ranking references", () => {
     const next = deleteWork(libraryWithCategory(), "work-a");
 
