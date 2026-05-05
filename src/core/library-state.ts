@@ -16,6 +16,7 @@ import {
   updateWork,
   updateRanking,
 } from "./library-actions";
+import { createWorkShareImage, type WorkShareVariant } from "./share-export";
 import type { LibraryRepository } from "./repository";
 
 export interface LibraryState {
@@ -40,6 +41,7 @@ export interface LibraryController {
   updateSelectedWork(input: WorkUpdateInput): Promise<void>;
   deleteSelectedWork(): Promise<void>;
   storeSelectedWorkCover(fileName: string, bytes: Uint8Array): Promise<void>;
+  exportSelectedWorkShare(variant: WorkShareVariant): Promise<string>;
   createRanking(input: RankingInput): Promise<void>;
   updateSelectedRanking(input: RankingUpdateInput): Promise<void>;
   deleteSelectedRanking(): Promise<void>;
@@ -341,6 +343,22 @@ export function createLibraryController(
         coverImagePath,
       });
       await saveLibrary(nextLibrary);
+    },
+
+    async exportSelectedWorkShare(variant) {
+      const workId = state.selectedWorkId;
+
+      if (!workId) {
+        throw new Error("Work not selected.");
+      }
+
+      const image = createWorkShareImage(state.library, workId, variant);
+      return repository.storeExport({
+        kind: "works",
+        id: image.id,
+        extension: image.extension,
+        bytes: image.bytes,
+      });
     },
 
     async createRanking(input) {

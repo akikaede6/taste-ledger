@@ -119,6 +119,24 @@ describe("library repository", () => {
     );
   });
 
+  it("stores export bytes under the exports directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ranking-repo-"));
+    const backend = createNodeFileBackend({ rootDir: root });
+    const repository = createLibraryRepository(backend);
+
+    const relativePath = await repository.storeExport({
+      kind: "works",
+      id: "work a cover",
+      extension: ".SVG",
+      bytes: new Uint8Array([9, 8, 7]),
+    });
+
+    expect(relativePath).toBe("exports/works/work_a_cover.svg");
+    expect(await backend.readBytes(relativePath)).toEqual(
+      new Uint8Array([9, 8, 7]),
+    );
+  });
+
   it("normalizes path segments", () => {
     expect(joinDataPath("images", "a", "b.png")).toBe("images/a/b.png");
     expect(sanitizePathSegment("work a/cover")).toBe("work_a_cover");

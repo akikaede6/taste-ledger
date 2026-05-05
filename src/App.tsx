@@ -39,6 +39,7 @@ import {
 import type { LibraryRepository } from "./core/repository";
 import { createLibraryRepository } from "./core/repository";
 import { calculateFinalScore } from "./core/scoring";
+import type { WorkShareVariant } from "./core/share-export";
 import { createRuntimeBackend } from "./platform/runtime-backend";
 
 interface WorkSaveInput {
@@ -108,6 +109,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     useState<RankingMode>("finalScore");
   const [newRankingDimensionId, setNewRankingDimensionId] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const categories = useMemo(
     () => sortCategoriesByRecentUpdate(state.library.categories),
@@ -145,12 +147,14 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     ? getRankingWorks(state.library, selectedRanking)
     : [];
 
-  async function runAction(action: () => Promise<void>) {
+  async function runAction<T>(action: () => Promise<T>): Promise<T | null> {
     setActionError(null);
+    setActionMessage(null);
     try {
-      await action();
+      return await action();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "操作失败。");
+      return null;
     }
   }
 
@@ -230,6 +234,16 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     await runAction(async () =>
       controller.storeSelectedWorkCover(fileName, bytes),
     );
+  }
+
+  async function handleExportWorkShare(variant: WorkShareVariant) {
+    const exportPath = await runAction(async () =>
+      controller.exportSelectedWorkShare(variant),
+    );
+
+    if (exportPath) {
+      setActionMessage(`已导出：${exportPath}`);
+    }
   }
 
   async function handleCreateRanking(event: FormEvent<HTMLFormElement>) {
@@ -639,9 +653,11 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   <WorkEditor
                     key={`${selectedWork.id}-${selectedWork.updatedAt}`}
                     work={selectedWork}
+                    categoryName={selectedCategory?.name ?? ""}
                     onSave={handleSaveWork}
                     onDelete={handleDeleteWork}
                     onCoverUpload={handleStoreWorkCover}
+                    onExport={handleExportWorkShare}
                   />
                 ) : (
                   <p className="muted">
@@ -678,6 +694,11 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         )}
 
         {actionError ? <p className="inline-error">{actionError}</p> : null}
+        {actionMessage ? (
+          <p className="inline-message" role="status">
+            {actionMessage}
+          </p>
+        ) : null}
       </section>
     </main>
   );
@@ -685,9 +706,11 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
 
 interface WorkEditorProps {
   work: Work;
+  categoryName: string;
   onSave(input: WorkSaveInput): Promise<void>;
   onDelete(): Promise<void>;
   onCoverUpload(fileName: string, bytes: Uint8Array): Promise<void>;
+  onExport(variant: WorkShareVariant): Promise<void>;
 }
 
 interface RatingDimensionDraft {
@@ -711,9 +734,11 @@ interface WorkDraft {
 
 function WorkEditor({
   work,
+  categoryName,
   onSave,
   onDelete,
   onCoverUpload,
+  onExport,
 }: WorkEditorProps) {
   const [workDraft, setWorkDraft] = useState<WorkDraft>(() => ({
     title: work.title,
@@ -724,6 +749,8 @@ function WorkEditor({
     RatingDimensionDraft[]
   >(() => createDimensionDrafts(work.ratingDimensions));
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [exportingVariant, setExportingVariant] =
+    useState<WorkShareVariant | null>(null);
 
   const dimensionState = useMemo(
     () => readDimensionDrafts(dimensionDrafts),
@@ -755,6 +782,15 @@ function WorkEditor({
 
     await onCoverUpload(file.name, new Uint8Array(await file.arrayBuffer()));
     event.currentTarget.value = "";
+  }
+
+  async function handleExport(variant: WorkShareVariant) {
+    setExportingVariant(variant);
+    try {
+      await onExport(variant);
+    } finally {
+      setExportingVariant(null);
+    }
   }
 
   function updateDimensionDraft(
@@ -833,6 +869,20 @@ function WorkEditor({
             onChange={(event) => void handleCoverUpload(event)}
           />
         </label>
+      </div>
+
+      <div className="work-share-preview" aria-label="作品分享预览">
+        <div className="work-share-preview-cover">
+          {work.coverImagePath ?? "未设置封面"}
+        </div>
+        <div className="work-share-preview-copy">
+          <p className="eyebrow">{categoryName || "未分类"}</p>
+          <strong>{work.title}</strong>
+          <small>
+            {work.finalScore === null ? "未评分" : `${work.finalScore} 分`}
+          </small>
+          {work.shortReview ? <p>{work.shortReview}</p> : null}
+        </div>
       </div>
 
       <div className="dimension-editor">
@@ -969,6 +1019,27 @@ function WorkEditor({
         >
           <Trash2 aria-hidden="true" size={16} />
           删除作品
+        </button>
+      </div>
+
+      <div className="button-row">
+        <button
+          className="text-button"
+          type="button"
+          onClick={() => void handleExport("cover")}
+          disabled={exportingVariant !== null}
+        >
+          <ImagePlus aria-hidden="true" size={16} />
+          {exportingVariant === "cover" ? "导出中" : "导出封面图"}
+        </button>
+        <button
+          className="text-button"
+          type="button"
+          onClick={() => void handleExport("long")}
+          disabled={exportingVariant !== null}
+        >
+          <FileText aria-hidden="true" size={16} />
+          {exportingVariant === "long" ? "导出中" : "导出长图"}
         </button>
       </div>
     </form>

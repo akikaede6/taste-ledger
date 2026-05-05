@@ -80,7 +80,9 @@ describe("app workflow", () => {
     fireEvent.click(screen.getByRole("button", { name: /重新载入/ }));
 
     await waitFor(() => {
-      expect(screen.getByText("作品 A")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /作品 A/ }),
+      ).toBeInTheDocument();
       expect(screen.getByLabelText("短评")).toHaveValue("短评内容");
       expect(screen.getByLabelText("长评")).toHaveValue("第一段\n第二段");
       expect(screen.getByText("当前评分 8.67")).toBeInTheDocument();
@@ -128,6 +130,34 @@ describe("app workflow", () => {
       );
       expect(rows[0]).toHaveTextContent("作品 A");
       expect(rows[1]).toHaveTextContent("作品 B");
+    });
+  });
+
+  it("exports work share images into the data directory", async () => {
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "本地个人评分工具" });
+
+    fireEvent.change(screen.getByLabelText("新分类"), {
+      target: { value: "影视作品" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await screen.findByRole("button", { name: /影视作品/ });
+
+    await createScoredWork("作品 A", 8);
+
+    fireEvent.click(screen.getByRole("button", { name: "导出封面图" }));
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /已导出：exports\/works\/[^/]+-cover-\d+\.svg/,
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "导出长图" }));
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /已导出：exports\/works\/[^/]+-long-\d+\.svg/,
+      );
     });
   });
 });
