@@ -1,13 +1,20 @@
 import { createEmptyLibrary, type Library } from "./model";
 import {
   createCategory,
+  createRanking,
   createWork,
   deleteCategory,
+  deleteRanking,
   deleteWork,
+  moveRankingWork,
   renameCategory,
   sortCategoriesByRecentUpdate,
+  sortRankingsByRecentUpdate,
+  type RankingInput,
+  type RankingUpdateInput,
   type WorkUpdateInput,
   updateWork,
+  updateRanking,
 } from "./library-actions";
 import type { LibraryRepository } from "./repository";
 
@@ -16,6 +23,7 @@ export interface LibraryState {
   library: Library;
   selectedCategoryId: string | null;
   selectedWorkId: string | null;
+  selectedRankingId: string | null;
   errorMessage: string | null;
 }
 
@@ -24,6 +32,7 @@ export interface LibraryController {
   load(): Promise<void>;
   selectCategory(categoryId: string | null): void;
   selectWork(workId: string | null): void;
+  selectRanking(rankingId: string | null): void;
   createCategory(name: string): Promise<void>;
   renameSelectedCategory(name: string): Promise<void>;
   deleteSelectedCategory(): Promise<void>;
@@ -31,6 +40,10 @@ export interface LibraryController {
   updateSelectedWork(input: WorkUpdateInput): Promise<void>;
   deleteSelectedWork(): Promise<void>;
   storeSelectedWorkCover(fileName: string, bytes: Uint8Array): Promise<void>;
+  createRanking(input: RankingInput): Promise<void>;
+  updateSelectedRanking(input: RankingUpdateInput): Promise<void>;
+  deleteSelectedRanking(): Promise<void>;
+  moveSelectedRankingWork(workId: string, direction: -1 | 1): Promise<void>;
   refresh(): Promise<void>;
   subscribe(listener: () => void): () => void;
 }
@@ -43,6 +56,7 @@ export function createLibraryController(
     library: createEmptyLibrary(),
     selectedCategoryId: null,
     selectedWorkId: null,
+    selectedRankingId: null,
     errorMessage: null,
   };
 
@@ -59,7 +73,10 @@ export function createLibraryController(
 
   function normalizeSelection(
     library: Library,
-  ): Pick<LibraryState, "selectedCategoryId" | "selectedWorkId"> {
+  ): Pick<
+    LibraryState,
+    "selectedCategoryId" | "selectedWorkId" | "selectedRankingId"
+  > {
     const categoryId =
       state.selectedCategoryId &&
       library.categories.some(
@@ -80,9 +97,26 @@ export function createLibraryController(
             null)
           : null;
 
+    const rankingId =
+      state.selectedRankingId &&
+      library.rankings.some(
+        (ranking) =>
+          ranking.id === state.selectedRankingId &&
+          ranking.categoryId === categoryId,
+      )
+        ? state.selectedRankingId
+        : categoryId
+          ? (sortRankingsByRecentUpdate(
+              library.rankings.filter(
+                (ranking) => ranking.categoryId === categoryId,
+              ),
+            )[0]?.id ?? null)
+          : null;
+
     return {
       selectedCategoryId: categoryId,
       selectedWorkId: workId,
+      selectedRankingId: rankingId,
     };
   }
 
@@ -90,7 +124,7 @@ export function createLibraryController(
     library: Library,
     selectionOverride?: Pick<
       LibraryState,
-      "selectedCategoryId" | "selectedWorkId"
+      "selectedCategoryId" | "selectedWorkId" | "selectedRankingId"
     >,
   ) {
     try {
@@ -103,6 +137,7 @@ export function createLibraryController(
         errorMessage: null,
         selectedCategoryId: selection.selectedCategoryId,
         selectedWorkId: selection.selectedWorkId,
+        selectedRankingId: selection.selectedRankingId,
       });
     } catch (error) {
       setState({
@@ -130,6 +165,7 @@ export function createLibraryController(
         library: result.library,
         selectedCategoryId: selection.selectedCategoryId,
         selectedWorkId: selection.selectedWorkId,
+        selectedRankingId: selection.selectedRankingId,
         errorMessage: null,
       });
     } catch (error) {
@@ -138,6 +174,7 @@ export function createLibraryController(
         library: createEmptyLibrary(),
         selectedCategoryId: null,
         selectedWorkId: null,
+        selectedRankingId: null,
         errorMessage:
           error instanceof Error ? error.message : "Failed to load library.",
       });
@@ -159,10 +196,19 @@ export function createLibraryController(
           ? null
           : (state.library.works.find((work) => work.categoryId === categoryId)
               ?.id ?? null);
+      const selectedRankingId =
+        categoryId === null
+          ? null
+          : (sortRankingsByRecentUpdate(
+              state.library.rankings.filter(
+                (ranking) => ranking.categoryId === categoryId,
+              ),
+            )[0]?.id ?? null);
       setState({
         ...state,
         selectedCategoryId: categoryId,
         selectedWorkId,
+        selectedRankingId,
       });
     },
 
@@ -170,6 +216,43 @@ export function createLibraryController(
       setState({
         ...state,
         selectedWorkId: workId,
+      });
+    },
+
+    selectRanking(rankingId) {
+      if (rankingId === null) {
+        setState({
+          ...state,
+          selectedRankingId: null,
+        });
+        return;
+      }
+
+      const ranking = state.library.rankings.find(
+        (item) => item.id === rankingId,
+      );
+
+      if (!ranking) {
+        return;
+      }
+
+      const selectedWorkId =
+        ranking.workIds.find((workId) =>
+          state.library.works.some(
+            (work) =>
+              work.id === workId && work.categoryId === ranking.categoryId,
+          ),
+        ) ??
+        state.library.works.find(
+          (work) => work.categoryId === ranking.categoryId,
+        )?.id ??
+        null;
+
+      setState({
+        ...state,
+        selectedCategoryId: ranking.categoryId,
+        selectedWorkId,
+        selectedRankingId: rankingId,
       });
     },
 
@@ -214,6 +297,7 @@ export function createLibraryController(
       await saveLibrary(result.library, {
         selectedCategoryId: categoryId,
         selectedWorkId: result.work.id,
+        selectedRankingId: state.selectedRankingId,
       });
     },
 
@@ -256,6 +340,65 @@ export function createLibraryController(
       const nextLibrary = updateWork(state.library, workId, {
         coverImagePath,
       });
+      await saveLibrary(nextLibrary);
+    },
+
+    async createRanking(input) {
+      const categoryId = state.selectedCategoryId;
+
+      if (!categoryId) {
+        throw new Error("Category not selected.");
+      }
+
+      const result = createRanking(state.library, {
+        ...input,
+        categoryId,
+      });
+
+      await saveLibrary(result.library, {
+        selectedCategoryId: categoryId,
+        selectedWorkId:
+          state.library.works.find((work) => work.categoryId === categoryId)
+            ?.id ?? null,
+        selectedRankingId: result.ranking.id,
+      });
+    },
+
+    async updateSelectedRanking(input) {
+      const rankingId = state.selectedRankingId;
+
+      if (!rankingId) {
+        return;
+      }
+
+      const nextLibrary = updateRanking(state.library, rankingId, input);
+      await saveLibrary(nextLibrary);
+    },
+
+    async deleteSelectedRanking() {
+      const rankingId = state.selectedRankingId;
+
+      if (!rankingId) {
+        return;
+      }
+
+      const nextLibrary = deleteRanking(state.library, rankingId);
+      await saveLibrary(nextLibrary);
+    },
+
+    async moveSelectedRankingWork(workId, direction) {
+      const rankingId = state.selectedRankingId;
+
+      if (!rankingId) {
+        return;
+      }
+
+      const nextLibrary = moveRankingWork(
+        state.library,
+        rankingId,
+        workId,
+        direction,
+      );
       await saveLibrary(nextLibrary);
     },
 

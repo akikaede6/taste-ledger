@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCategory,
+  createRanking,
   createWork,
   deleteCategory,
   deleteWork,
+  moveRankingWork,
   renameCategory,
   updateWork,
 } from "../src/core/library-actions";
@@ -14,6 +16,8 @@ import {
 } from "../src/core/model";
 
 const now = "2026-05-05T02:00:00.000Z";
+
+const rankingNow = "2026-05-05T02:30:00.000Z";
 
 function libraryWithCategory(): Library {
   return {
@@ -81,6 +85,92 @@ function libraryWithCategory(): Library {
         updatedAt: now,
       },
     ],
+    exportSettings: {
+      workCoverTemplate: "default",
+      workLongTemplate: "default",
+      rankingTemplate: "default",
+    },
+  };
+}
+
+function rankingLibrary(): Library {
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    categories: [
+      {
+        id: "cat-film",
+        name: "影视作品",
+        createdAt: now,
+        updatedAt: now,
+        ratingDimensionTemplates: [
+          {
+            id: "story",
+            name: "剧情",
+            weight: 1,
+          },
+        ],
+      },
+    ],
+    works: [
+      {
+        id: "work-a",
+        categoryId: "cat-film",
+        title: "作品 A",
+        coverImagePath: null,
+        shortReview: "",
+        longReview: "",
+        ratingDimensions: [
+          {
+            id: "story",
+            name: "剧情",
+            score: 7,
+            weight: 1,
+          },
+        ],
+        finalScore: 8,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "work-b",
+        categoryId: "cat-film",
+        title: "作品 B",
+        coverImagePath: null,
+        shortReview: "",
+        longReview: "",
+        ratingDimensions: [
+          {
+            id: "story",
+            name: "剧情",
+            score: 9,
+            weight: 1,
+          },
+        ],
+        finalScore: 6,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "work-c",
+        categoryId: "cat-film",
+        title: "作品 C",
+        coverImagePath: null,
+        shortReview: "",
+        longReview: "",
+        ratingDimensions: [
+          {
+            id: "story",
+            name: "剧情",
+            score: 8,
+            weight: 1,
+          },
+        ],
+        finalScore: 7,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    rankings: [],
     exportSettings: {
       workCoverTemplate: "default",
       workLongTemplate: "default",
@@ -237,6 +327,102 @@ describe("category actions", () => {
         ],
       }),
     ).toThrow("Rating dimension 1 score must be valid.");
+  });
+
+  it("creates a ranking sorted by final score", () => {
+    vi.setSystemTime(new Date(rankingNow));
+
+    const result = createRanking(rankingLibrary(), {
+      categoryId: "cat-film",
+      name: "从夯到拉",
+      mode: "finalScore",
+    });
+
+    expect(result.ranking).toMatchObject({
+      name: "从夯到拉",
+      mode: "finalScore",
+      dimensionId: null,
+      createdAt: rankingNow,
+      updatedAt: rankingNow,
+    });
+    expect(result.ranking.workIds).toEqual(["work-a", "work-c", "work-b"]);
+  });
+
+  it("creates a ranking sorted by a single dimension", () => {
+    vi.setSystemTime(new Date(rankingNow));
+
+    const result = createRanking(rankingLibrary(), {
+      categoryId: "cat-film",
+      name: "剧情排行",
+      mode: "dimension",
+      dimensionId: "story",
+    });
+
+    expect(result.ranking.workIds).toEqual(["work-b", "work-c", "work-a"]);
+  });
+
+  it("refreshes automatic rankings when a work score changes", () => {
+    vi.setSystemTime(new Date(rankingNow));
+
+    const next = updateWork(
+      {
+        ...rankingLibrary(),
+        rankings: [
+          {
+            id: "ranking-film",
+            categoryId: "cat-film",
+            name: "从夯到拉",
+            mode: "finalScore",
+            dimensionId: null,
+            workIds: ["work-a", "work-c", "work-b"],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      },
+      "work-b",
+      {
+        ratingDimensions: [
+          {
+            id: "story",
+            name: "剧情",
+            score: 10,
+            weight: 1,
+          },
+        ],
+      },
+    );
+
+    expect(next.rankings[0].workIds).toEqual(["work-b", "work-a", "work-c"]);
+    expect(next.rankings[0].updatedAt).toBe(rankingNow);
+  });
+
+  it("moves a work within a manual ranking", () => {
+    vi.setSystemTime(new Date(rankingNow));
+
+    const next = moveRankingWork(
+      {
+        ...rankingLibrary(),
+        rankings: [
+          {
+            id: "ranking-manual",
+            categoryId: "cat-film",
+            name: "手动排行",
+            mode: "manual",
+            dimensionId: null,
+            workIds: ["work-a", "work-b", "work-c"],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      },
+      "ranking-manual",
+      "work-b",
+      -1,
+    );
+
+    expect(next.rankings[0].workIds).toEqual(["work-b", "work-a", "work-c"]);
+    expect(next.rankings[0].updatedAt).toBe(rankingNow);
   });
 
   it("deletes a work and removes ranking references", () => {

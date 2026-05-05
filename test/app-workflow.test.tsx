@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 
@@ -80,4 +86,79 @@ describe("app workflow", () => {
       expect(screen.getByText("当前评分 8.67")).toBeInTheDocument();
     });
   });
+
+  it("creates an automatic ranking and refreshes it after scoring changes", async () => {
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "本地个人评分工具" });
+
+    fireEvent.change(screen.getByLabelText("新分类"), {
+      target: { value: "影视作品" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await screen.findByRole("button", { name: /影视作品/ });
+
+    await createScoredWork("作品 A", 8);
+    await createScoredWork("作品 B", 10);
+
+    fireEvent.click(screen.getByRole("button", { name: "创建排行" }));
+
+    expect(
+      await screen.findByRole("button", { name: /从夯到拉/ }),
+    ).toBeInTheDocument();
+
+    await waitFor(() => {
+      const rows = within(screen.getByLabelText("排行作品")).getAllByRole(
+        "listitem",
+      );
+      expect(rows[0]).toHaveTextContent("作品 B");
+      expect(rows[1]).toHaveTextContent("作品 A");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /作品 A/ }));
+    fireEvent.change(screen.getByLabelText("评分 1"), {
+      target: { value: "11" },
+    });
+    await screen.findByText("当前评分 11");
+    fireEvent.click(screen.getByRole("button", { name: "保存作品" }));
+
+    await waitFor(() => {
+      const rows = within(screen.getByLabelText("排行作品")).getAllByRole(
+        "listitem",
+      );
+      expect(rows[0]).toHaveTextContent("作品 A");
+      expect(rows[1]).toHaveTextContent("作品 B");
+    });
+  });
 });
+
+async function createScoredWork(title: string, score: number) {
+  fireEvent.change(screen.getByLabelText("新作品"), {
+    target: { value: title },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "创建作品" }));
+
+  expect(
+    await screen.findByRole("button", { name: new RegExp(title) }),
+  ).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
+  fireEvent.change(screen.getByLabelText("维度名称 1"), {
+    target: { value: "剧情" },
+  });
+  fireEvent.change(screen.getByLabelText("评分 1"), {
+    target: { value: String(score) },
+  });
+  fireEvent.change(screen.getByLabelText("权重 1"), {
+    target: { value: "1" },
+  });
+
+  await screen.findByText(`当前评分 ${score}`);
+  fireEvent.click(screen.getByRole("button", { name: "保存作品" }));
+
+  await waitFor(() => {
+    expect(
+      screen.getByRole("button", { name: new RegExp(title) }),
+    ).toHaveTextContent(`${score} 分`);
+  });
+}

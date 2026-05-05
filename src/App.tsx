@@ -1,4 +1,6 @@
 import {
+  ArrowDown,
+  ArrowUp,
   BookOpen,
   FileText,
   FolderPlus,
@@ -11,6 +13,7 @@ import {
   Save,
   Star,
   Trash2,
+  Trophy,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -20,8 +23,19 @@ import {
   useState,
 } from "react";
 import { sortCategoriesByRecentUpdate } from "./core/library-actions";
+import { sortRankingsByRecentUpdate } from "./core/library-actions";
 import { useLibraryState } from "./core/library-store";
-import type { RatingDimensionScore, Work } from "./core/model";
+import type {
+  Ranking,
+  RankingMode,
+  RatingDimensionScore,
+  Work,
+} from "./core/model";
+import {
+  collectRankingDimensionOptions,
+  getRankingWorks,
+  type RankingDimensionOption,
+} from "./core/ranking";
 import type { LibraryRepository } from "./core/repository";
 import { createLibraryRepository } from "./core/repository";
 import { calculateFinalScore } from "./core/scoring";
@@ -33,6 +47,18 @@ interface WorkSaveInput {
   longReview: string;
   ratingDimensions: RatingDimensionScore[];
 }
+
+interface RankingSaveInput {
+  name: string;
+  mode: RankingMode;
+  dimensionId: string | null;
+}
+
+const RANKING_MODE_LABELS: Record<RankingMode, string> = {
+  finalScore: "最终评分",
+  dimension: "单维度评分",
+  manual: "手动排序",
+};
 
 export function App() {
   const [repository, setRepository] = useState<LibraryRepository | null>(null);
@@ -77,6 +103,10 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   const { state, controller } = useLibraryState(repository);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newWorkTitle, setNewWorkTitle] = useState("");
+  const [newRankingName, setNewRankingName] = useState("从夯到拉");
+  const [newRankingMode, setNewRankingMode] =
+    useState<RankingMode>("finalScore");
+  const [newRankingDimensionId, setNewRankingDimensionId] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
 
   const categories = useMemo(
@@ -93,9 +123,27 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         (work) => work.categoryId === selectedCategory.id,
       )
     : [];
+  const categoryRankings = selectedCategory
+    ? sortRankingsByRecentUpdate(
+        state.library.rankings.filter(
+          (ranking) => ranking.categoryId === selectedCategory.id,
+        ),
+      )
+    : [];
+  const rankingDimensionOptions = selectedCategory
+    ? collectRankingDimensionOptions(categoryWorks)
+    : [];
   const selectedWork = state.selectedWorkId
     ? state.library.works.find((work) => work.id === state.selectedWorkId)
     : null;
+  const selectedRanking = state.selectedRankingId
+    ? state.library.rankings.find(
+        (ranking) => ranking.id === state.selectedRankingId,
+      )
+    : null;
+  const selectedRankingWorks = selectedRanking
+    ? getRankingWorks(state.library, selectedRanking)
+    : [];
 
   async function runAction(action: () => Promise<void>) {
     setActionError(null);
@@ -181,6 +229,75 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   async function handleStoreWorkCover(fileName: string, bytes: Uint8Array) {
     await runAction(async () =>
       controller.storeSelectedWorkCover(fileName, bytes),
+    );
+  }
+
+  async function handleCreateRanking(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedCategory) {
+      return;
+    }
+
+    const name = newRankingName.trim();
+
+    if (name.length === 0) {
+      setActionError("排行名称不能为空。");
+      return;
+    }
+
+    if (newRankingMode === "manual" && categoryWorks.length === 0) {
+      setActionError("手动排行需要至少一个作品。");
+      return;
+    }
+
+    const selectedDimensionId =
+      newRankingMode === "dimension"
+        ? getRankingDimensionValue(
+            newRankingDimensionId,
+            rankingDimensionOptions,
+          )
+        : null;
+
+    if (newRankingMode === "dimension" && !selectedDimensionId) {
+      setActionError("先为当前分类添加可用评分维度。");
+      return;
+    }
+
+    await runAction(async () => {
+      await controller.createRanking({
+        categoryId: selectedCategory.id,
+        name,
+        mode: newRankingMode,
+        dimensionId: selectedDimensionId,
+      });
+      setNewRankingName("从夯到拉");
+      setNewRankingMode("finalScore");
+      setNewRankingDimensionId("");
+    });
+  }
+
+  async function handleSaveRanking(input: RankingSaveInput) {
+    await runAction(async () => controller.updateSelectedRanking(input));
+  }
+
+  async function handleDeleteRanking() {
+    if (!selectedRanking) {
+      return;
+    }
+
+    const confirmed = window.confirm(`删除排行「${selectedRanking.name}」？`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    await runAction(async () => controller.deleteSelectedRanking());
+  }
+
+  async function handleMoveRankingWork(workId: string, direction: -1 | 1) {
+    await runAction(async () =>
+      controller.moveSelectedRankingWork(workId, direction),
     );
   }
 
@@ -360,6 +477,134 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   )}
                 </div>
               </section>
+
+              <section className="panel">
+                <div className="panel-heading">
+                  <Trophy aria-hidden="true" size={18} />
+                  <h3>排行</h3>
+                </div>
+
+                {selectedCategory ? (
+                  <>
+                    <form
+                      className="create-form ranking-create-form"
+                      onSubmit={handleCreateRanking}
+                    >
+                      <label htmlFor="new-ranking">新排行</label>
+                      <input
+                        id="new-ranking"
+                        value={newRankingName}
+                        onChange={(event) =>
+                          setNewRankingName(event.target.value)
+                        }
+                        placeholder="从夯到拉"
+                      />
+
+                      <div className="ranking-create-grid">
+                        <label className="sr-only" htmlFor="new-ranking-mode">
+                          排行方式
+                        </label>
+                        <select
+                          id="new-ranking-mode"
+                          value={newRankingMode}
+                          onChange={(event) => {
+                            const mode = event.target.value as RankingMode;
+                            setNewRankingMode(mode);
+                            if (mode !== "dimension") {
+                              setNewRankingDimensionId("");
+                            }
+                          }}
+                        >
+                          <option value="finalScore">最终评分</option>
+                          <option value="dimension">单维度评分</option>
+                          <option value="manual">手动排序</option>
+                        </select>
+
+                        <label
+                          className="sr-only"
+                          htmlFor="new-ranking-dimension"
+                        >
+                          评分维度
+                        </label>
+                        <select
+                          id="new-ranking-dimension"
+                          value={getRankingDimensionValue(
+                            newRankingDimensionId,
+                            rankingDimensionOptions,
+                          )}
+                          onChange={(event) =>
+                            setNewRankingDimensionId(event.target.value)
+                          }
+                          disabled={
+                            newRankingMode !== "dimension" ||
+                            rankingDimensionOptions.length === 0
+                          }
+                        >
+                          {rankingDimensionOptions.length > 0 ? (
+                            rankingDimensionOptions.map((dimension) => (
+                              <option key={dimension.id} value={dimension.id}>
+                                {dimension.name}
+                              </option>
+                            ))
+                          ) : (
+                            <option value="">暂无可用评分维度</option>
+                          )}
+                        </select>
+
+                        <button
+                          className="icon-button primary"
+                          type="submit"
+                          aria-label="创建排行"
+                        >
+                          <ListPlus aria-hidden="true" size={18} />
+                        </button>
+                      </div>
+                    </form>
+
+                    <div className="ranking-list" aria-label="排行列表">
+                      {categoryRankings.length > 0 ? (
+                        categoryRankings.map((ranking) => {
+                          const selected =
+                            ranking.id === state.selectedRankingId;
+
+                          return (
+                            <button
+                              key={ranking.id}
+                              className={
+                                selected
+                                  ? "ranking-button selected"
+                                  : "ranking-button"
+                              }
+                              type="button"
+                              onClick={() =>
+                                controller.selectRanking(ranking.id)
+                              }
+                            >
+                              <span>{ranking.name}</span>
+                              <small>
+                                {RANKING_MODE_LABELS[ranking.mode]}
+                                {ranking.mode === "dimension" &&
+                                ranking.dimensionId
+                                  ? ` · ${getRankingDimensionName(
+                                      ranking.dimensionId,
+                                      rankingDimensionOptions,
+                                    )}`
+                                  : ""}
+                                {" · "}
+                                {ranking.workIds.length} 作品
+                              </small>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <p className="muted">这个分类还没有排行。</p>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <p className="muted">先创建一个分类，再创建排行。</p>
+                )}
+              </section>
             </div>
 
             <div className="stack">
@@ -402,6 +647,29 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   <p className="muted">
                     <BookOpen aria-hidden="true" size={16} />
                     选择或创建一个作品后，可以编辑封面、短评和长评。
+                  </p>
+                )}
+              </section>
+
+              <section className="panel">
+                <div className="panel-heading">
+                  <Trophy aria-hidden="true" size={18} />
+                  <h3>排行详情</h3>
+                </div>
+
+                {selectedRanking ? (
+                  <RankingEditor
+                    key={`${selectedRanking.id}-${selectedRanking.updatedAt}`}
+                    ranking={selectedRanking}
+                    works={selectedRankingWorks}
+                    dimensionOptions={rankingDimensionOptions}
+                    onSave={handleSaveRanking}
+                    onDelete={handleDeleteRanking}
+                    onMoveWork={handleMoveRankingWork}
+                  />
+                ) : (
+                  <p className="muted">
+                    选择或创建一个排行后，可以查看排序结果。
                   </p>
                 )}
               </section>
@@ -707,6 +975,202 @@ function WorkEditor({
   );
 }
 
+interface RankingEditorProps {
+  ranking: Ranking;
+  works: Work[];
+  dimensionOptions: RankingDimensionOption[];
+  onSave(input: RankingSaveInput): Promise<void>;
+  onDelete(): Promise<void>;
+  onMoveWork(workId: string, direction: -1 | 1): Promise<void>;
+}
+
+interface RankingDraft {
+  name: string;
+  mode: RankingMode;
+  dimensionId: string;
+}
+
+function RankingEditor({
+  ranking,
+  works,
+  dimensionOptions,
+  onSave,
+  onDelete,
+  onMoveWork,
+}: RankingEditorProps) {
+  const [draft, setDraft] = useState<RankingDraft>(() => ({
+    name: ranking.name,
+    mode: ranking.mode,
+    dimensionId: ranking.dimensionId ?? "",
+  }));
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const editorDimensions = useMemo(
+    () => ensureRankingDimensionOption(dimensionOptions, ranking.dimensionId),
+    [dimensionOptions, ranking.dimensionId],
+  );
+  const selectedDimensionId = getRankingDimensionValue(
+    draft.dimensionId,
+    editorDimensions,
+  );
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (draft.name.trim().length === 0) {
+      setDraftError("排行名称不能为空。");
+      return;
+    }
+
+    if (draft.mode === "dimension" && !selectedDimensionId) {
+      setDraftError("先为当前分类添加可用评分维度。");
+      return;
+    }
+
+    if (draft.mode === "manual" && works.length === 0) {
+      setDraftError("手动排行需要至少一个作品。");
+      return;
+    }
+
+    setDraftError(null);
+
+    await onSave({
+      name: draft.name,
+      mode: draft.mode,
+      dimensionId: draft.mode === "dimension" ? selectedDimensionId : null,
+    });
+  }
+
+  return (
+    <div className="ranking-editor">
+      <form
+        className="ranking-editor-form"
+        noValidate
+        onSubmit={(event) => void handleSubmit(event)}
+      >
+        <label htmlFor={`ranking-name-${ranking.id}`}>排行名称</label>
+        <input
+          id={`ranking-name-${ranking.id}`}
+          value={draft.name}
+          onChange={(event) =>
+            setDraft((current) => ({
+              ...current,
+              name: event.currentTarget.value,
+            }))
+          }
+        />
+
+        <div className="ranking-editor-grid">
+          <div>
+            <label htmlFor={`ranking-mode-${ranking.id}`}>排行方式</label>
+            <select
+              id={`ranking-mode-${ranking.id}`}
+              value={draft.mode}
+              onChange={(event) => {
+                const mode = event.currentTarget.value as RankingMode;
+                setDraft((current) => ({
+                  ...current,
+                  mode,
+                  dimensionId: mode === "dimension" ? current.dimensionId : "",
+                }));
+              }}
+            >
+              <option value="finalScore">最终评分</option>
+              <option value="dimension">单维度评分</option>
+              <option value="manual">手动排序</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor={`ranking-dimension-${ranking.id}`}>评分维度</label>
+            <select
+              id={`ranking-dimension-${ranking.id}`}
+              value={selectedDimensionId}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  dimensionId: event.currentTarget.value,
+                }))
+              }
+              disabled={
+                draft.mode !== "dimension" || editorDimensions.length === 0
+              }
+            >
+              {editorDimensions.length > 0 ? (
+                editorDimensions.map((dimension) => (
+                  <option key={dimension.id} value={dimension.id}>
+                    {dimension.name}
+                  </option>
+                ))
+              ) : (
+                <option value="">暂无可用评分维度</option>
+              )}
+            </select>
+          </div>
+        </div>
+
+        <div className="button-row">
+          <button className="text-button primary" type="submit">
+            <Save aria-hidden="true" size={16} />
+            保存排行
+          </button>
+          <button
+            className="text-button danger"
+            type="button"
+            onClick={() => void onDelete()}
+          >
+            <Trash2 aria-hidden="true" size={16} />
+            删除排行
+          </button>
+        </div>
+
+        {draftError ? (
+          <p className="inline-error" role="alert">
+            {draftError}
+          </p>
+        ) : null}
+      </form>
+
+      {works.length > 0 ? (
+        <ol className="ranking-work-list" aria-label="排行作品">
+          {works.map((work, index) => (
+            <li className="ranking-work-row" key={work.id}>
+              <span className="rank-number">{index + 1}</span>
+              <div className="ranking-work-copy">
+                <strong>{work.title}</strong>
+                <small>{formatRankingWorkScore(work, ranking)}</small>
+              </div>
+              {ranking.mode === "manual" ? (
+                <div className="ranking-work-actions">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label={`上移 ${work.title}`}
+                    disabled={index === 0}
+                    onClick={() => void onMoveWork(work.id, -1)}
+                  >
+                    <ArrowUp aria-hidden="true" size={16} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label={`下移 ${work.title}`}
+                    disabled={index === works.length - 1}
+                    onClick={() => void onMoveWork(work.id, 1)}
+                  >
+                    <ArrowDown aria-hidden="true" size={16} />
+                  </button>
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="muted">这个排行还没有作品。</p>
+      )}
+    </div>
+  );
+}
+
 function createDimensionDrafts(
   ratingDimensions: RatingDimensionScore[],
 ): RatingDimensionDraft[] {
@@ -791,6 +1255,53 @@ function failDimensionDraft(message: string): RatingDimensionDraftState {
     finalScore: null,
     ratingDimensions: [],
   };
+}
+
+function ensureRankingDimensionOption(
+  options: RankingDimensionOption[],
+  dimensionId: string | null,
+): RankingDimensionOption[] {
+  if (!dimensionId || options.some((option) => option.id === dimensionId)) {
+    return options;
+  }
+
+  return [
+    ...options,
+    {
+      id: dimensionId,
+      name: `维度 ${dimensionId}`,
+    },
+  ];
+}
+
+function getRankingDimensionValue(
+  dimensionId: string,
+  options: RankingDimensionOption[],
+): string {
+  return options.some((option) => option.id === dimensionId)
+    ? dimensionId
+    : (options[0]?.id ?? "");
+}
+
+function getRankingDimensionName(
+  dimensionId: string,
+  options: RankingDimensionOption[],
+): string {
+  return (
+    options.find((option) => option.id === dimensionId)?.name ??
+    `维度 ${dimensionId}`
+  );
+}
+
+function formatRankingWorkScore(work: Work, ranking: Ranking): string {
+  if (ranking.mode === "dimension" && ranking.dimensionId) {
+    const dimension = work.ratingDimensions.find(
+      (item) => item.id === ranking.dimensionId,
+    );
+    return dimension ? `${dimension.score} 分` : "未评分";
+  }
+
+  return work.finalScore === null ? "未评分" : `${work.finalScore} 分`;
 }
 
 function LoadingShell({ label }: { label: string }) {
