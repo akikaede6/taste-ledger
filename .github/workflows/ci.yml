@@ -56,9 +56,6 @@ jobs:
             artifact_path: dist-electron/*.AppImage
             setup_java: false
             setup_android: false
-    env:
-      ELECTRON_CACHE: ~/.cache/electron
-      ELECTRON_BUILDER_CACHE: ~/.cache/electron-builder
     steps:
       - name: Checkout
         uses: actions/checkout@v4
