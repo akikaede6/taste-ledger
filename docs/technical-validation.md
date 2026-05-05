@@ -54,6 +54,10 @@ The desktop shell should expose IPC methods for:
 - Copying imported images into `images/`.
 - Saving exported share files below `exports/`.
 
+The Electron preload now exposes that file backend through
+`window.rankingNative.storage`, with the main process rooted at the visible data
+directory.
+
 ## Android Data Directory
 
 Android builds should use Capacitor Filesystem under `Directory.Documents` with
@@ -74,6 +78,10 @@ The Android shell should support:
 - Reading/writing UTF-8 JSON.
 - Writing imported cover images and exported PNG files as base64 content.
 - Reporting permission denial as a recoverable UI error.
+
+The Android runtime now uses a Capacitor Filesystem backend under
+`Directory.Documents/ranking-data/` and requests public storage permission before
+touching that directory.
 
 ## Image Persistence
 

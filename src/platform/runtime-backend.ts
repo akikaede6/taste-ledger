@@ -1,6 +1,8 @@
+import { Capacitor } from "@capacitor/core";
 import { createBrowserStorageBackend } from "./browser-backend";
 import { createMemoryBackend } from "./memory-backend";
 import type { JsonFileBackend } from "../core/repository";
+import { createCapacitorFilesystemBackend } from "./capacitor-backend";
 
 export interface NativeBridge {
   storage: JsonFileBackend;
@@ -15,6 +17,10 @@ declare global {
 export async function createRuntimeBackend(): Promise<JsonFileBackend> {
   if (typeof window !== "undefined" && window.rankingNative?.storage) {
     return window.rankingNative.storage;
+  }
+
+  if (typeof window !== "undefined" && Capacitor.isNativePlatform()) {
+    return createCapacitorFilesystemBackend();
   }
 
   if (typeof window !== "undefined" && hasFunctionalLocalStorage()) {

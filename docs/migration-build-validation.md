@@ -24,42 +24,41 @@ storage, ranking export storage, work share payloads, and ranking share payloads
 That is enough to validate the core migration contract: copy the data root, then
 load the same `library.json` and relative byte files from the new location.
 
-## Current Runtime Gap
+## Current Runtime Adapters
 
-The core repository is portable, but production runtime adapters still need to
-bind it to visible platform folders:
+The core repository is now wired to visible platform folders:
 
-- Electron currently exposes `window.rankingDesktop`, not a
-  `window.rankingNative.storage` backend, so the renderer falls back to browser
-  storage instead of `<Documents>/Ranking/ranking-data/`.
-- Android has Capacitor dependencies and can sync web assets, but there is not
-  yet a complete native project with a Gradle wrapper.
-- A Capacitor filesystem backend should use `Directory.Documents` and the
-  `ranking-data/` app folder so copied data remains user-visible.
+- Electron exposes a `window.rankingNative.storage` bridge in preload.
+- Electron main process files live below `<Documents>/Ranking/ranking-data/`.
+- Android uses a Capacitor Filesystem backend rooted at `ranking-data/` inside
+  `Directory.Documents`.
+- The shared browser fallback still exists for non-native development and test
+  environments.
 
-These gaps should be closed before release artifacts are considered complete.
+The remaining build-time dependency is the local Java/Android SDK toolchain
+needed to compile the Android artifact.
 
 ## Smoke Commands
 
-| Command                          | Result | Notes                                                                                                    |
-| -------------------------------- | ------ | -------------------------------------------------------------------------------------------------------- |
-| `npm run build`                  | Pass   | TypeScript and Vite production build complete.                                                           |
-| `npm exec cap -- ls`             | Pass   | Capacitor sees `@capacitor/filesystem` and `@capacitor/share` for Android.                               |
-| `npm run android:sync`           | Pass   | Builds web assets and syncs them into `android/app/src/main/assets/public`.                              |
-| `npm run android:build`          | Fail   | Sync succeeds, then `./gradlew assembleDebug` fails because `android/gradlew` does not exist.            |
-| `npm exec electron -- --version` | Fail   | Local Electron package reports that the Electron binary did not install correctly.                       |
-| `npm run electron:build`         | Fail   | Web build and electron-builder startup succeed, then Electron zip download from GitHub fails with `EOF`. |
+| Command                          | Result | Notes                                                                                                  |
+| -------------------------------- | ------ | ------------------------------------------------------------------------------------------------------ |
+| `npm run build`                  | Pass   | TypeScript and Vite production build complete.                                                         |
+| `npm exec cap -- ls`             | Pass   | Capacitor sees `@capacitor/filesystem` and `@capacitor/share` for Android.                             |
+| `npm run android:sync`           | Pass   | Builds web assets and syncs them into the Android project.                                             |
+| `npm run android:build`          | Fail   | Sync succeeds, then `./gradlew assembleDebug` stops because this local shell has no Java installation. |
+| `npm exec electron -- --version` | Fail   | The local `electron` package still reports that its binary was not installed correctly.                |
+| `npm run electron:build`         | Pass   | electron-builder downloads Electron and produces `dist-electron/Ranking-0.1.0.AppImage`.               |
 
 ## Build Conclusions
 
-Android artifact generation is not yet ready. Task 14 should add a complete
-Capacitor Android project, commit the required native project files, and set up
-CI with Java and Gradle so `assembleDebug` can run on a Linux runner.
+Android artifact generation is ready in principle. Task 14 should keep the
+native project checked in, set up CI with Java and Android tooling, and publish
+`assembleDebug` only when the build job succeeds.
 
-Desktop artifact generation is structurally configured through `electron-builder`
-but depends on a successful Electron binary download. CI should not set
-`ELECTRON_SKIP_BINARY_DOWNLOAD` for artifact jobs, and it should cache Electron
-downloads when possible.
+Desktop artifact generation is structurally configured through
+`electron-builder`. The CI artifact job should not set
+`ELECTRON_SKIP_BINARY_DOWNLOAD`, and it should upload the AppImage only after
+the build step succeeds.
 
 The current green local checks are still useful release gates:
 
