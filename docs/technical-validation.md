@@ -52,7 +52,7 @@ The desktop shell should expose IPC methods for:
 - Resolving and showing the current data directory.
 - Reading/writing `library.json`.
 - Copying imported images into `images/`.
-- Saving exported PNG files through a native save dialog.
+- Saving exported share files below `exports/`.
 
 ## Android Data Directory
 
@@ -96,12 +96,14 @@ Share exports should use shared payload builders and platform-specific saving:
 - Ranking image: current ranking order, ranking criterion, rank number, title,
   and score.
 
-The browser layer can render a share component to SVG/canvas and produce PNG
-bytes. Platform adapters then save those bytes:
+The current implementation renders deterministic SVG bytes in the shared core
+and stores those files inside the data directory:
 
-- Electron: use `dialog.showSaveDialog()` and Node file writing.
-- Android: write PNG bytes through Capacitor Filesystem and optionally invoke
-  Capacitor Share.
+- Work exports: `exports/works/<id>.svg`.
+- Ranking exports: `exports/rankings/<id>.svg`.
+
+Platform adapters can later add user-selected save locations or native share
+sheets without changing the shared payload builders.
 
 ## Risks and Decisions
 
