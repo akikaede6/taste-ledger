@@ -10,16 +10,16 @@ export function createBrowserStorageBackend(): JsonFileBackend {
     },
 
     async readText(path) {
-      const value = window.localStorage.getItem(textKey(path));
+      const value = storageGet(textKey(path));
       return value === null ? null : value;
     },
 
     async writeTextAtomic(path, content) {
-      window.localStorage.setItem(textKey(path), content);
+      storageSet(textKey(path), content);
     },
 
     async readBytes(path) {
-      const value = window.localStorage.getItem(bytesKey(path));
+      const value = storageGet(bytesKey(path));
       if (value === null) {
         return null;
       }
@@ -33,18 +33,18 @@ export function createBrowserStorageBackend(): JsonFileBackend {
     },
 
     async writeBytesAtomic(path, content) {
-      window.localStorage.setItem(bytesKey(path), bytesToBase64(content));
+      storageSet(bytesKey(path), bytesToBase64(content));
     },
 
     async deletePath(path) {
-      window.localStorage.removeItem(textKey(path));
-      window.localStorage.removeItem(bytesKey(path));
+      storageDelete(textKey(path));
+      storageDelete(bytesKey(path));
     },
 
     async exists(path) {
       return (
-        window.localStorage.getItem(textKey(path)) !== null ||
-        window.localStorage.getItem(bytesKey(path)) !== null
+        storageGet(textKey(path)) !== null ||
+        storageGet(bytesKey(path)) !== null
       );
     },
   };
@@ -64,4 +64,40 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(byte);
   }
   return window.btoa(binary);
+}
+
+function storageGet(key: string): string | null {
+  const storage = window.localStorage as Partial<Storage> &
+    Record<string, unknown>;
+
+  if (typeof storage.getItem === "function") {
+    return storage.getItem(key);
+  }
+
+  const value = storage[key];
+  return typeof value === "string" ? value : null;
+}
+
+function storageSet(key: string, value: string) {
+  const storage = window.localStorage as Partial<Storage> &
+    Record<string, unknown>;
+
+  if (typeof storage.setItem === "function") {
+    storage.setItem(key, value);
+    return;
+  }
+
+  storage[key] = value;
+}
+
+function storageDelete(key: string) {
+  const storage = window.localStorage as Partial<Storage> &
+    Record<string, unknown>;
+
+  if (typeof storage.removeItem === "function") {
+    storage.removeItem(key);
+    return;
+  }
+
+  delete storage[key];
 }

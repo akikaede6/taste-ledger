@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCategory,
+  createWork,
   deleteCategory,
+  deleteWork,
   renameCategory,
+  updateWork,
 } from "../src/core/library-actions";
 import {
   createEmptyLibrary,
@@ -21,7 +24,13 @@ function libraryWithCategory(): Library {
         name: "影视作品",
         createdAt: now,
         updatedAt: now,
-        ratingDimensionTemplates: [],
+        ratingDimensionTemplates: [
+          {
+            id: "story",
+            name: "剧情",
+            weight: 2,
+          },
+        ],
       },
     ],
     works: [
@@ -130,5 +139,56 @@ describe("category actions", () => {
     expect(next.rankings.map((ranking) => ranking.id)).toEqual([
       "ranking-other",
     ]);
+  });
+
+  it("creates a work with inherited rating dimensions", () => {
+    vi.setSystemTime(new Date(now));
+
+    const result = createWork(libraryWithCategory(), {
+      categoryId: "cat-film",
+      title: "  作品 C  ",
+    });
+
+    expect(result.work).toMatchObject({
+      title: "作品 C",
+      categoryId: "cat-film",
+      shortReview: "",
+      longReview: "",
+      finalScore: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(result.work.ratingDimensions).toEqual([
+      {
+        id: "story",
+        name: "剧情",
+        score: 0,
+        weight: 2,
+      },
+    ]);
+  });
+
+  it("updates work title and reviews independently", () => {
+    vi.setSystemTime(new Date("2026-05-05T02:20:00.000Z"));
+
+    const next = updateWork(libraryWithCategory(), "work-a", {
+      title: "作品 A 改",
+      shortReview: "短评",
+      longReview: "第一段\n第二段",
+    });
+
+    expect(next.works[0]).toMatchObject({
+      title: "作品 A 改",
+      shortReview: "短评",
+      longReview: "第一段\n第二段",
+      updatedAt: "2026-05-05T02:20:00.000Z",
+    });
+  });
+
+  it("deletes a work and removes ranking references", () => {
+    const next = deleteWork(libraryWithCategory(), "work-a");
+
+    expect(next.works.map((work) => work.id)).toEqual(["work-b"]);
+    expect(next.rankings[0].workIds).toEqual([]);
   });
 });

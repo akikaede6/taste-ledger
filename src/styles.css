@@ -121,7 +121,21 @@ input {
   outline: none;
 }
 
-input:focus {
+textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #20222b;
+  padding: 10px 12px;
+  line-height: 1.6;
+  outline: none;
+}
+
+input:focus,
+textarea:focus {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
@@ -158,6 +172,12 @@ input:focus {
   padding: 0 14px;
   color: #1f3a5f;
   background: #eaf1ff;
+}
+
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
 }
 
 .primary {
@@ -224,6 +244,13 @@ input:focus {
   gap: 18px;
 }
 
+.stack {
+  min-width: 0;
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
 .panel {
   border: 1px solid #dbe3ef;
   border-radius: 8px;
@@ -267,6 +294,107 @@ input:focus {
 
 .muted {
   color: #64748b;
+}
+
+.muted svg {
+  vertical-align: text-bottom;
+  margin-right: 4px;
+}
+
+.work-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.work-button {
+  width: 100%;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #20222b;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  text-align: left;
+}
+
+.work-button span {
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.work-button small {
+  color: #64748b;
+  overflow-wrap: anywhere;
+}
+
+.work-button.selected {
+  border-color: #0f766e;
+  background: #ecfdf5;
+}
+
+.detail-form {
+  display: grid;
+  gap: 12px;
+}
+
+.cover-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.cover-preview {
+  min-height: 48px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  color: #64748b;
+  min-width: 0;
+}
+
+.cover-preview span {
+  overflow-wrap: anywhere;
+}
+
+.file-picker {
+  min-height: 42px;
+  border-radius: 8px;
+  background: #f0fdfa;
+  color: #0f766e;
+  border: 1px solid #99f6e4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+  margin: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.file-picker input {
+  display: none;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.score-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: #526070;
+  font-weight: 700;
 }
 
 .inline-error {
