@@ -53,8 +53,10 @@ jobs:
           - target: linux
             runner: ubuntu-latest
             build_script: electron:build
-            artifact_name: ranking-linux-appimage
-            artifact_path: dist-electron/*.AppImage
+            artifact_name: ranking-linux
+            artifact_path: |
+              dist-electron/*.AppImage
+              dist-electron/*.tar.gz
             setup_java: false
             setup_android: false
           - target: windows
@@ -139,6 +141,7 @@ jobs:
             find release-assets -type f \( \
               -name '*.apk' -o \
               -name '*.AppImage' -o \
+              -name '*.tar.gz' -o \
               -name '*.exe' -o \
               -name '*.dmg' \
             \) -print0

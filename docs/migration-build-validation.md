@@ -47,7 +47,7 @@ needed to compile the Android artifact.
 | `npm run android:sync`           | Pass   | Builds web assets and syncs them into the Android project.                                             |
 | `npm run android:build`          | Fail   | Sync succeeds, then `./gradlew assembleDebug` stops because this local shell has no Java installation. |
 | `npm exec electron -- --version` | Fail   | The local `electron` package still reports that its binary was not installed correctly.                |
-| `npm run electron:build`         | Pass   | electron-builder downloads Electron and produces `dist-electron/Ranking-0.1.0.AppImage`.               |
+| `npm run electron:build`         | Pass   | electron-builder downloads Electron and produces Linux desktop artifacts.                              |
 
 ## Build Conclusions
 
@@ -58,7 +58,9 @@ native project checked in, set up CI with Java and Android tooling, and publish
 Desktop artifact generation is structurally configured through
 `electron-builder`. The CI artifact job should not set
 `ELECTRON_SKIP_BINARY_DOWNLOAD`, and it should upload each runner's native
-desktop artifact only after the build step succeeds.
+desktop artifact only after the build step succeeds. The Linux build now
+includes both AppImage and tarball outputs; the tarball avoids the host FUSE
+requirement that AppImage has on some distributions.
 
 The current green local checks are still useful release gates:
 

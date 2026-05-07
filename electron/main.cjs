@@ -4,6 +4,10 @@ const { randomUUID } = require("node:crypto");
 const path = require("node:path");
 
 const isDev = process.env.VITE_DEV_SERVER_URL;
+
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("disable-gpu");
+
 const dataRoot = () =>
   path.join(app.getPath("documents"), "Ranking", "ranking-data");
 

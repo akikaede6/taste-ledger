@@ -34,7 +34,7 @@ flow from the repository layer.
 CI publishes native artifacts after the verify job passes:
 
 - Android debug APK: `ranking-android-debug-apk`
-- Linux desktop AppImage: `ranking-linux-appimage`
+- Linux desktop bundle: `ranking-linux`
 - Windows installer: `ranking-windows-installer`
 - macOS DMG: `ranking-macos-dmg`
 
@@ -48,7 +48,8 @@ Local build commands mirror the same outputs where the host platform allows it:
 
 The Android path requires a Java/Android SDK setup. Desktop builds require the
 Electron binary download step to succeed, and the native target must match the
-host runner or local OS.
+host runner or local OS. On Linux, the AppImage requires FUSE on the host
+system, so the tarball is the fallback when FUSE is unavailable.
 
 ## First-Release Boundary
 
