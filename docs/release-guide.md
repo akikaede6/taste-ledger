@@ -31,18 +31,24 @@ flow from the repository layer.
 
 ## Build Artifacts
 
-CI publishes two native artifacts after the verify job passes:
+CI publishes native artifacts after the verify job passes:
 
 - Android debug APK: `ranking-android-debug-apk`
 - Linux desktop AppImage: `ranking-linux-appimage`
+- Windows installer: `ranking-windows-installer`
+- macOS DMG: `ranking-macos-dmg`
 
-Local build commands mirror the same outputs:
+The workflow also creates a GitHub prerelease automatically on successful
+pushes to `master` and uploads the current build outputs there.
+
+Local build commands mirror the same outputs where the host platform allows it:
 
 - `npm run android:build`
 - `npm run electron:build`
 
-The Android path requires a Java/Android SDK setup. The desktop path requires
-the Electron binary download step to succeed.
+The Android path requires a Java/Android SDK setup. Desktop builds require the
+Electron binary download step to succeed, and the native target must match the
+host runner or local OS.
 
 ## First-Release Boundary
 

@@ -57,8 +57,8 @@ native project checked in, set up CI with Java and Android tooling, and publish
 
 Desktop artifact generation is structurally configured through
 `electron-builder`. The CI artifact job should not set
-`ELECTRON_SKIP_BINARY_DOWNLOAD`, and it should upload the AppImage only after
-the build step succeeds.
+`ELECTRON_SKIP_BINARY_DOWNLOAD`, and it should upload each runner's native
+desktop artifact only after the build step succeeds.
 
 The current green local checks are still useful release gates:
 
