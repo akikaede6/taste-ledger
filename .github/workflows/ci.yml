@@ -75,7 +75,11 @@ jobs:
 
       - name: Setup Android SDK
         if: matrix.setup_android
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK packages
+        if: matrix.setup_android
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Install dependencies
         run: npm ci
