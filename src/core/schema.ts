@@ -18,6 +18,11 @@ import {
   type ValidationResult,
   type Work,
 } from "./model";
+import {
+  getCategoryAncestorIds,
+  getCategoryDescendantIds,
+  getCategoryRootId,
+} from "./category-tree";
 import { recalculateWorkScore } from "./scoring";
 
 type JsonRecord = Record<string, unknown>;
@@ -147,6 +152,12 @@ function readCategory(
 
   const category: Category = {
     id: readRequiredString(record, "id", `${path}.id`, issues),
+    parentCategoryId: readOptionalNullableString(
+      record,
+      "parentCategoryId",
+      `${path}.parentCategoryId`,
+      issues,
+    ),
     name: readRequiredString(record, "name", `${path}.name`, issues),
     createdAt: readDateString(record, "createdAt", `${path}.createdAt`, issues),
     updatedAt: readDateString(record, "updatedAt", `${path}.updatedAt`, issues),
@@ -191,6 +202,7 @@ function readWork(
     `${path}.coverImagePath`,
     issues,
   );
+  const tags = readOptionalStringArray(record, "tags", `${path}.tags`, issues);
   const work: Work = {
     id: readRequiredString(record, "id", `${path}.id`, issues),
     categoryId: readRequiredString(
@@ -201,6 +213,7 @@ function readWork(
     ),
     title: readRequiredString(record, "title", `${path}.title`, issues),
     coverImagePath,
+    tags,
     shortReview: readString(
       record,
       "shortReview",
@@ -461,6 +474,9 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
     library.categories.map((category) => category.id),
   );
   const workById = new Map(library.works.map((work) => [work.id, work]));
+  const categoryById = new Map(
+    library.categories.map((category) => [category.id, category] as const),
+  );
 
   validateUniqueIds(
     library.categories.map((category) => category.id),
@@ -489,6 +505,40 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
       `$.categories[${categoryIndex}].ratingDimensionTemplates`,
       issues,
     );
+
+    if (
+      category.parentCategoryId !== null &&
+      category.parentCategoryId !== undefined &&
+      !categoryIds.has(category.parentCategoryId)
+    ) {
+      issues.push({
+        path: `$.categories[${categoryIndex}].parentCategoryId`,
+        message: "Category references a missing parent category.",
+        severity: "error",
+      });
+    }
+
+    if (
+      category.parentCategoryId !== null &&
+      getCategoryAncestorIds(library, category.id).includes(category.id)
+    ) {
+      issues.push({
+        path: `$.categories[${categoryIndex}].parentCategoryId`,
+        message: "Category parent chain cannot contain cycles.",
+        severity: "error",
+      });
+    }
+
+    if (
+      category.parentCategoryId !== null &&
+      category.ratingDimensionTemplates.length > 0
+    ) {
+      issues.push({
+        path: `$.categories[${categoryIndex}].ratingDimensionTemplates`,
+        message: "Only root categories may define shared rating dimensions.",
+        severity: "error",
+      });
+    }
   });
 
   library.works.forEach((work, workIndex) => {
@@ -506,9 +556,8 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
       issues,
     );
 
-    const category = library.categories.find(
-      (item) => item.id === work.categoryId,
-    );
+    const rootCategoryId = getCategoryRootId(library, work.categoryId);
+    const category = rootCategoryId ? categoryById.get(rootCategoryId) : null;
 
     if (category) {
       const categoryDimensionIds = category.ratingDimensionTemplates.map(
@@ -537,6 +586,16 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
       });
     }
 
+    const rankingCategory = categoryById.get(ranking.categoryId);
+
+    if (rankingCategory && rankingCategory.parentCategoryId !== null) {
+      issues.push({
+        path: `$.rankings[${rankingIndex}].categoryId`,
+        message: "Rankings may only be attached to root categories.",
+        severity: "error",
+      });
+    }
+
     validateUniqueIds(
       ranking.workIds,
       `$.rankings[${rankingIndex}].workIds`,
@@ -544,9 +603,7 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
     );
 
     if (ranking.mode === "dimension" && ranking.dimensionId) {
-      const category = library.categories.find(
-        (item) => item.id === ranking.categoryId,
-      );
+      const category = categoryById.get(ranking.categoryId);
 
       if (
         category &&
@@ -571,10 +628,12 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
           message: "Ranking references a missing work.",
           severity: "error",
         });
-      } else if (work.categoryId !== ranking.categoryId) {
+      } else if (
+        !isCategoryInScope(library, ranking.categoryId, work.categoryId)
+      ) {
         issues.push({
           path: `$.rankings[${rankingIndex}].workIds[${workIndex}]`,
-          message: "Ranking cannot include works from another category.",
+          message: "Ranking cannot include works outside its category tree.",
           severity: "error",
         });
       }
@@ -586,6 +645,16 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
       issues.push({
         path: `$.tierLists[${tierListIndex}].categoryId`,
         message: "Tier list references a missing category.",
+        severity: "error",
+      });
+    }
+
+    const tierListCategory = categoryById.get(tierList.categoryId);
+
+    if (tierListCategory && tierListCategory.parentCategoryId !== null) {
+      issues.push({
+        path: `$.tierLists[${tierListIndex}].categoryId`,
+        message: "Tier lists may only be attached to root categories.",
         severity: "error",
       });
     }
@@ -629,10 +698,13 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
             message: "Tier list references a missing work.",
             severity: "error",
           });
-        } else if (work.categoryId !== tierList.categoryId) {
+        } else if (
+          !isCategoryInScope(library, tierList.categoryId, work.categoryId)
+        ) {
           issues.push({
             path: `$.tierLists[${tierListIndex}].levels[${levelIndex}].workIds[${workIndex}]`,
-            message: "Tier list cannot include works from another category.",
+            message:
+              "Tier list cannot include works outside its category tree.",
             severity: "error",
           });
         }
@@ -727,13 +799,48 @@ function readStringArray(
   }
 
   return value.flatMap((item, index) => {
-    if (typeof item === "string" && item.trim().length > 0) {
+    if (typeof item === "string") {
       return [item];
     }
 
     issues.push({
       path: `${path}[${index}]`,
-      message: "Expected a non-empty string.",
+      message: "Expected a string.",
+      severity: "error",
+    });
+    return [];
+  });
+}
+
+function readOptionalStringArray(
+  record: JsonRecord,
+  key: string,
+  path: string,
+  issues: ValidationIssue[],
+): string[] {
+  if (!(key in record)) {
+    return [];
+  }
+
+  const value = record[key];
+
+  if (!Array.isArray(value)) {
+    issues.push({
+      path,
+      message: "Expected an array of strings.",
+      severity: "error",
+    });
+    return [];
+  }
+
+  return value.flatMap((item, index) => {
+    if (typeof item === "string") {
+      return [item];
+    }
+
+    issues.push({
+      path: `${path}[${index}]`,
+      message: "Expected a string.",
       severity: "error",
     });
     return [];
@@ -842,6 +949,19 @@ function readNullableString(
     severity: "error",
   });
   return null;
+}
+
+function readOptionalNullableString(
+  record: JsonRecord,
+  key: string,
+  path: string,
+  issues: ValidationIssue[],
+): string | null {
+  if (!(key in record)) {
+    return null;
+  }
+
+  return readNullableString(record, key, path, issues);
 }
 
 function readDateString(
@@ -958,15 +1078,22 @@ function normalizeLibraryRatingDimensions(library: Library): Library {
   const next = structuredClone(library);
 
   next.categories = next.categories.map((category) => {
+    if (category.parentCategoryId !== null) {
+      return category;
+    }
+
     if (category.ratingDimensionTemplates.length > 0) {
       return category;
     }
 
     const templates: RatingDimensionTemplate[] = [];
     const seenIds = new Set<string>();
+    const categoryScopeIds = new Set(
+      getCategoryDescendantIds(next, category.id),
+    );
 
     next.works
-      .filter((work) => work.categoryId === category.id)
+      .filter((work) => categoryScopeIds.has(work.categoryId))
       .forEach((work) => {
         work.ratingDimensions.forEach((dimension) => {
           if (!seenIds.has(dimension.id)) {
@@ -991,7 +1118,10 @@ function normalizeLibraryRatingDimensions(library: Library): Library {
   );
 
   next.works = next.works.map((work) => {
-    const category = categoryById.get(work.categoryId);
+    const rootCategoryId = getCategoryRootId(next, work.categoryId);
+    const category = rootCategoryId
+      ? categoryById.get(rootCategoryId)
+      : undefined;
 
     if (!category) {
       return work;
@@ -1027,6 +1157,17 @@ function normalizeLibraryRatingDimensions(library: Library): Library {
   }));
 
   return next;
+}
+
+function isCategoryInScope(
+  library: Library,
+  scopeCategoryId: string,
+  categoryId: string,
+): boolean {
+  return (
+    scopeCategoryId === categoryId ||
+    getCategoryAncestorIds(library, categoryId).includes(scopeCategoryId)
+  );
 }
 
 function sameStringList(left: string[], right: string[]): boolean {

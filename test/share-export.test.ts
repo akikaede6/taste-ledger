@@ -20,6 +20,7 @@ function shareLibrary(): Library {
     categories: [
       {
         id: "cat-film",
+        parentCategoryId: null,
         name: "影视作品",
         createdAt: now,
         updatedAt: now,
@@ -32,6 +33,7 @@ function shareLibrary(): Library {
         categoryId: "cat-film",
         title: "作品 A",
         coverImagePath: null,
+        tags: [],
         shortReview: "短评内容",
         longReview: "第一段\n第二段",
         ratingDimensions: [
@@ -57,6 +59,7 @@ function shareLibrary(): Library {
         categoryId: "cat-film",
         title: "作品 B",
         coverImagePath: null,
+        tags: [],
         shortReview: "另一条短评",
         longReview: "",
         ratingDimensions: [

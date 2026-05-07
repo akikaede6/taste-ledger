@@ -243,6 +243,18 @@ select:disabled {
   text-align: left;
 }
 
+.category-button-row {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.category-button-row span {
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .category-button span {
   font-weight: 800;
   overflow-wrap: anywhere;
@@ -268,6 +280,21 @@ select:disabled {
   align-items: flex-start;
   gap: 16px;
   margin-bottom: 24px;
+}
+
+.workspace-path {
+  margin: 6px 0 0;
+  color: #526070;
+  font-size: 0.88rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.workspace-note {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 600;
 }
 
 .content-grid {
@@ -359,6 +386,76 @@ select:disabled {
 .work-button small {
   color: #64748b;
   overflow-wrap: anywhere;
+}
+
+.tag-filter-bar {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.tag-filter-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1f3a5f;
+}
+
+.tag-filter-heading h4 {
+  margin: 0;
+}
+
+.tag-filter-heading small {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.tag-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-chip {
+  min-height: 34px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f3a5f;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-weight: 700;
+}
+
+.tag-chip span {
+  overflow-wrap: anywhere;
+}
+
+.tag-chip small {
+  color: #64748b;
+}
+
+.tag-chip.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.tag-chip-row.compact {
+  margin-top: 4px;
+}
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  background: #eaf1ff;
+  color: #1f3a5f;
+  padding: 0 8px;
+  font-size: 0.76rem;
+  font-weight: 700;
 }
 
 .work-button.selected {
@@ -765,6 +862,10 @@ select:disabled {
   color: #475569;
   margin: 2px 0 0;
   overflow-wrap: anywhere;
+}
+
+.work-share-preview-copy .tag-chip-row {
+  margin-top: 2px;
 }
 
 .tier-list {

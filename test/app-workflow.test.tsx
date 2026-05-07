@@ -151,6 +151,100 @@ describe("app workflow", () => {
     });
   });
 
+  it("saves work tags and filters works by tag", async () => {
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Taste Ledger" });
+
+    fireEvent.change(screen.getByLabelText("新分类"), {
+      target: { value: "动画" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await screen.findByRole("button", { name: /动画/ });
+
+    fireEvent.change(screen.getByLabelText("新作品"), {
+      target: { value: "作品 A" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建作品" }));
+    await screen.findByRole("button", { name: /作品 A/ });
+
+    fireEvent.change(screen.getByLabelText("标签"), {
+      target: { value: "新番, 原创" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存作品" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /作品 A/ })).toHaveTextContent(
+        "新番",
+      );
+    });
+
+    fireEvent.change(screen.getByLabelText("新作品"), {
+      target: { value: "作品 B" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建作品" }));
+    await screen.findByRole("button", { name: /作品 B/ });
+
+    fireEvent.change(screen.getByLabelText("标签"), {
+      target: { value: "旧番" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存作品" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /作品 B/ })).toHaveTextContent(
+        "旧番",
+      );
+    });
+
+    const filterBar = screen.getByLabelText("标签筛选");
+    fireEvent.click(within(filterBar).getByRole("button", { name: /新番/ }));
+
+    await waitFor(() => {
+      const workList = screen.getByLabelText("作品列表");
+      expect(
+        within(workList).getByRole("button", { name: /作品 A/ }),
+      ).toBeInTheDocument();
+      expect(
+        within(workList).queryByRole("button", { name: /作品 B/ }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("creates child categories from the parent selector", async () => {
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Taste Ledger" });
+
+    fireEvent.change(screen.getByLabelText("新分类"), {
+      target: { value: "动画" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await screen.findByRole("button", { name: /动画/ });
+
+    const parentSelect = screen.getByLabelText("父分类");
+    const rootOption = within(parentSelect).getByRole("option", {
+      name: "动画",
+    }) as HTMLOptionElement;
+
+    fireEvent.change(parentSelect, {
+      target: { value: rootOption.value },
+    });
+    fireEvent.change(screen.getByLabelText("新分类"), {
+      target: { value: "2026年1月新番" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+
+    const childButton = await screen.findByRole("button", {
+      name: /2026年1月新番/,
+    });
+    fireEvent.click(childButton);
+
+    expect(
+      await screen.findByRole("heading", { name: "2026年1月新番" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("评分维度和排行由「动画」共享。"),
+    ).toBeInTheDocument();
+  });
+
   it("exports ranking share images in the displayed order", async () => {
     render(<App />);
 

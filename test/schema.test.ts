@@ -15,6 +15,7 @@ function sampleLibrary(): Library {
     categories: [
       {
         id: "cat-film",
+        parentCategoryId: null,
         name: "影视作品",
         createdAt: now,
         updatedAt: now,
@@ -28,6 +29,7 @@ function sampleLibrary(): Library {
       },
       {
         id: "cat-music",
+        parentCategoryId: null,
         name: "音乐",
         createdAt: now,
         updatedAt: now,
@@ -40,6 +42,7 @@ function sampleLibrary(): Library {
         categoryId: "cat-film",
         title: "作品 A",
         coverImagePath: "images/work-a.png",
+        tags: [],
         shortReview: "短评",
         longReview: "长评",
         ratingDimensions: [
@@ -59,6 +62,7 @@ function sampleLibrary(): Library {
         categoryId: "cat-music",
         title: "作品 B",
         coverImagePath: null,
+        tags: [],
         shortReview: "",
         longReview: "",
         ratingDimensions: [],
@@ -209,7 +213,64 @@ describe("library schema", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.rankings[0].workIds[1]",
-          message: "Ranking cannot include works from another category.",
+          message: "Ranking cannot include works outside its category tree.",
+        }),
+      ]),
+    );
+  });
+
+  it("accepts child category works that share root dimensions and rankings", () => {
+    const library = sampleLibrary();
+    library.categories.push({
+      id: "cat-film-2026-01",
+      parentCategoryId: "cat-film",
+      name: "2026年1月新番",
+      createdAt: now,
+      updatedAt: now,
+      ratingDimensionTemplates: [],
+    });
+    library.works[0] = {
+      ...library.works[0],
+      categoryId: "cat-film-2026-01",
+      tags: ["新番", "原创"],
+    };
+    library.rankings[0] = {
+      ...library.rankings[0],
+      categoryId: "cat-film",
+      workIds: ["work-a"],
+    };
+
+    const result = validateLibrary(library);
+
+    expect(result.ok).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it("rejects rating dimensions defined directly on child categories", () => {
+    const library = sampleLibrary();
+    library.categories.push({
+      id: "cat-film-2026-01",
+      parentCategoryId: "cat-film",
+      name: "2026年1月新番",
+      createdAt: now,
+      updatedAt: now,
+      ratingDimensionTemplates: [
+        {
+          id: "story-child",
+          name: "剧情",
+          weight: 1,
+        },
+      ],
+    });
+
+    const result = validateLibrary(library);
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.categories[2].ratingDimensionTemplates",
+          message: "Only root categories may define shared rating dimensions.",
         }),
       ]),
     );

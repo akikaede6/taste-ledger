@@ -5,6 +5,7 @@ import type {
   TierLevelId,
   Work,
 } from "./model";
+import { getCategoryAncestorIds } from "./category-tree";
 
 export type WorkShareVariant = "cover" | "long";
 export type RankingShareVariant = "long";
@@ -138,7 +139,12 @@ export function buildRankingSharePayload(
     throw new Error("Ranking has no works.");
   }
 
-  if (orderedWorks.some((work) => work.categoryId !== ranking.categoryId)) {
+  if (
+    orderedWorks.some(
+      (work) =>
+        !isCategoryInScope(library, ranking.categoryId, work.categoryId),
+    )
+  ) {
     throw new Error("Ranking export includes works from another category.");
   }
 
@@ -195,7 +201,10 @@ export function buildTierListSharePayload(
     items: level.workIds.flatMap((workId) => {
       const work = library.works.find((item) => item.id === workId);
 
-      if (!work || work.categoryId !== tierList.categoryId) {
+      if (
+        !work ||
+        !isCategoryInScope(library, tierList.categoryId, work.categoryId)
+      ) {
         return [];
       }
 
@@ -222,6 +231,17 @@ export function buildTierListSharePayload(
     categoryName: category.name,
     levels,
   };
+}
+
+function isCategoryInScope(
+  library: Library,
+  scopeCategoryId: string,
+  categoryId: string,
+): boolean {
+  return (
+    scopeCategoryId === categoryId ||
+    getCategoryAncestorIds(library, categoryId).includes(scopeCategoryId)
+  );
 }
 
 export function createTierListShareImage(

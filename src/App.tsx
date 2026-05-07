@@ -1,4 +1,6 @@
 import {
+  ChevronDown,
+  ChevronRight,
   ArrowDown,
   ArrowUp,
   BookOpen,
@@ -7,6 +9,7 @@ import {
   FileText,
   FolderPlus,
   FolderOpen,
+  Filter,
   ImagePlus,
   Library,
   Layers,
@@ -18,20 +21,28 @@ import {
   Star,
   Trash2,
   Trophy,
+  Tag,
   X,
 } from "lucide-react";
 import {
   type ChangeEvent,
   type FormEvent,
+  type ReactElement,
   useEffect,
   useMemo,
   useState,
 } from "react";
 import {
-  sortCategoriesByRecentUpdate,
   sortRankingsByRecentUpdate,
   sortTierListsByRecentUpdate,
 } from "./core/library-actions";
+import {
+  getCategoryDescendantIds,
+  getCategoryLineage,
+  getCategoryRootId,
+  getCategoryTree,
+  type CategoryTreeNode,
+} from "./core/category-tree";
 import { useLibraryState } from "./core/library-store";
 import type {
   Category,
@@ -63,6 +74,7 @@ import { getDesktopBridge } from "./platform/runtime-bridge";
 
 interface WorkSaveInput {
   title: string;
+  tags: string[];
   shortReview: string;
   longReview: string;
   ratingDimensions: RatingDimensionScore[];
@@ -140,7 +152,11 @@ export function App() {
 function Workspace({ repository }: { repository: LibraryRepository }) {
   const { state, controller } = useLibraryState(repository);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryParentId, setNewCategoryParentId] = useState<string | null>(
+    null,
+  );
   const [newWorkTitle, setNewWorkTitle] = useState("");
+  const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([]);
   const [newRankingName, setNewRankingName] = useState("");
   const [newRankingMode, setNewRankingMode] =
     useState<RankingMode>("finalScore");
@@ -156,60 +172,131 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   );
   const desktopBridge = getDesktopBridge();
 
-  const categories = useMemo(
-    () => sortCategoriesByRecentUpdate(state.library.categories),
-    [state.library.categories],
+  const categoryTree = useMemo(
+    () => getCategoryTree(state.library),
+    [state.library],
   );
   const selectedCategory = state.selectedCategoryId
     ? state.library.categories.find(
         (category) => category.id === state.selectedCategoryId,
       )
     : null;
+  const selectedCategoryRootId = selectedCategory
+    ? (getCategoryRootId(state.library, selectedCategory.id) ??
+      selectedCategory.id)
+    : null;
+  const selectedRootCategory = selectedCategoryRootId
+    ? state.library.categories.find(
+        (category) => category.id === selectedCategoryRootId,
+      )
+    : null;
+  const selectedCategoryLineage = selectedCategory
+    ? getCategoryLineage(state.library, selectedCategory.id)
+    : [];
+  const selectedCategoryPath = selectedCategoryLineage
+    .map((category) => category.name)
+    .join(" / ");
+  const selectedCategoryScopeIds = useMemo(
+    () =>
+      selectedCategory
+        ? new Set(getCategoryDescendantIds(state.library, selectedCategory.id))
+        : new Set<string>(),
+    [selectedCategory, state.library],
+  );
   const categoryWorks = useMemo(
     () =>
       selectedCategory
-        ? state.library.works.filter(
-            (work) => work.categoryId === selectedCategory.id,
+        ? state.library.works.filter((work) =>
+            selectedCategoryScopeIds.has(work.categoryId),
           )
         : [],
-    [selectedCategory, state.library.works],
+    [selectedCategory, selectedCategoryScopeIds, state.library.works],
   );
-  const categoryRankings = selectedCategory
+  const selectedRootScopeIds = useMemo(
+    () =>
+      selectedRootCategory
+        ? new Set(
+            getCategoryDescendantIds(state.library, selectedRootCategory.id),
+          )
+        : new Set<string>(),
+    [selectedRootCategory, state.library],
+  );
+  const sharedCategoryWorks = useMemo(
+    () =>
+      selectedRootCategory
+        ? state.library.works.filter((work) =>
+            selectedRootScopeIds.has(work.categoryId),
+          )
+        : [],
+    [selectedRootCategory, selectedRootScopeIds, state.library.works],
+  );
+  const categoryTagOptions = useMemo(
+    () => collectTagOptions(categoryWorks),
+    [categoryWorks],
+  );
+  const activeTagFilters = useMemo(() => {
+    const optionValues = new Set(
+      categoryTagOptions.map((option) => option.value),
+    );
+    return selectedTagFilters.filter((tag) => optionValues.has(tag));
+  }, [categoryTagOptions, selectedTagFilters]);
+  const visibleWorks = useMemo(
+    () =>
+      categoryWorks.filter((work) =>
+        matchesTagFilters(work.tags, activeTagFilters),
+      ),
+    [activeTagFilters, categoryWorks],
+  );
+  const categoryRankings = selectedRootCategory
     ? sortRankingsByRecentUpdate(
         state.library.rankings.filter(
-          (ranking) => ranking.categoryId === selectedCategory.id,
+          (ranking) => ranking.categoryId === selectedRootCategory.id,
         ),
       )
     : [];
-  const categoryTierLists = selectedCategory
+  const categoryTierLists = selectedRootCategory
     ? sortTierListsByRecentUpdate(
         state.library.tierLists.filter(
-          (tierList) => tierList.categoryId === selectedCategory.id,
+          (tierList) => tierList.categoryId === selectedRootCategory.id,
         ),
       )
     : [];
-  const rankingDimensionOptions = selectedCategory
-    ? collectRankingDimensionOptions(selectedCategory.ratingDimensionTemplates)
+  const rankingDimensionOptions = selectedRootCategory
+    ? collectRankingDimensionOptions(
+        selectedRootCategory.ratingDimensionTemplates,
+      )
     : [];
   const selectedWork = state.selectedWorkId
     ? state.library.works.find((work) => work.id === state.selectedWorkId)
     : null;
-  const selectedRanking = state.selectedRankingId
-    ? state.library.rankings.find(
-        (ranking) => ranking.id === state.selectedRankingId,
-      )
-    : null;
-  const selectedTierList = state.selectedTierListId
-    ? state.library.tierLists.find(
-        (tierList) =>
-          tierList.id === state.selectedTierListId &&
-          tierList.categoryId === selectedCategory?.id,
-      )
-    : null;
+  const selectedRanking =
+    state.selectedRankingId && selectedRootCategory
+      ? state.library.rankings.find(
+          (ranking) =>
+            ranking.id === state.selectedRankingId &&
+            ranking.categoryId === selectedRootCategory.id,
+        )
+      : null;
+  const selectedTierList =
+    state.selectedTierListId && selectedRootCategory
+      ? state.library.tierLists.find(
+          (tierList) =>
+            tierList.id === state.selectedTierListId &&
+            tierList.categoryId === selectedRootCategory.id,
+        )
+      : null;
   const selectedRankingWorks = selectedRanking
     ? getRankingWorks(state.library, selectedRanking)
     : [];
   const coverImageUrls = useCoverImageUrls(repository, categoryWorks);
+  const sharedCoverImageUrls = useCoverImageUrls(
+    repository,
+    sharedCategoryWorks,
+  );
+  const categoryParentOptions = useMemo(
+    () => flattenCategoryTreeOptions(categoryTree),
+    [categoryTree],
+  );
 
   useEffect(() => {
     storeExportPreferences(exportPreferences);
@@ -235,7 +322,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     }
 
     await runAction(async () => {
-      await controller.createCategory(newCategoryName);
+      await controller.createCategory(newCategoryName, newCategoryParentId);
       setNewCategoryName("");
     });
   }
@@ -288,6 +375,14 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
 
   async function handleSaveWork(input: WorkSaveInput) {
     await runAction(async () => controller.updateSelectedWork(input));
+  }
+
+  function toggleTagFilter(tag: string) {
+    setSelectedTagFilters(
+      activeTagFilters.includes(tag)
+        ? activeTagFilters.filter((item) => item !== tag)
+        : [...activeTagFilters, tag],
+    );
   }
 
   async function handleDeleteWork() {
@@ -369,7 +464,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
       return;
     }
 
-    if (newRankingMode === "manual" && categoryWorks.length === 0) {
+    if (newRankingMode === "manual" && sharedCategoryWorks.length === 0) {
       setActionError("手动排行需要至少一个作品。");
       return;
     }
@@ -575,6 +670,64 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     setExportDialog(null);
   }
 
+  function renderCategoryNodes(
+    nodes: CategoryTreeNode[],
+    depth = 0,
+  ): ReactElement[] {
+    return nodes.flatMap((node) => {
+      const categoryScopeIds = new Set(
+        getCategoryDescendantIds(state.library, node.category.id),
+      );
+      const workCount = state.library.works.filter((work) =>
+        categoryScopeIds.has(work.categoryId),
+      ).length;
+      const rankingCount =
+        node.category.parentCategoryId === null
+          ? state.library.rankings.filter(
+              (ranking) => ranking.categoryId === node.category.id,
+            ).length
+          : 0;
+      const tierListCount =
+        node.category.parentCategoryId === null
+          ? state.library.tierLists.filter(
+              (tierList) => tierList.categoryId === node.category.id,
+            ).length
+          : 0;
+      const meta = [
+        `${workCount} 作品`,
+        ...(node.children.length > 0 ? [`${node.children.length} 子分类`] : []),
+        ...(node.category.parentCategoryId === null
+          ? [`${rankingCount} 排行`, `${tierListCount} 分级`]
+          : []),
+      ].join(" · ");
+
+      return [
+        <button
+          key={node.category.id}
+          className={
+            node.category.id === state.selectedCategoryId
+              ? "category-button selected"
+              : "category-button"
+          }
+          type="button"
+          style={{ paddingLeft: `${12 + depth * 18}px` }}
+          onClick={() => controller.selectCategory(node.category.id)}
+        >
+          <div className="category-button-row">
+            {node.children.length > 0 ? (
+              <ChevronDown aria-hidden="true" size={14} />
+            ) : (
+              <ChevronRight aria-hidden="true" size={14} />
+            )}
+            <span>{node.category.name}</span>
+          </div>
+          <small>{meta}</small>
+        </button>,
+        ...renderCategoryNodes(node.children, depth + 1),
+      ];
+    });
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar" aria-label="分类">
@@ -586,7 +739,10 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
           </div>
         </div>
 
-        <form className="create-form" onSubmit={handleCreateCategory}>
+        <form
+          className="create-form category-create-form"
+          onSubmit={handleCreateCategory}
+        >
           <label htmlFor="new-category">新分类</label>
           <div className="inline-form-row">
             <input
@@ -603,37 +759,29 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
               <FolderPlus aria-hidden="true" size={18} />
             </button>
           </div>
+          <label htmlFor="new-category-parent">父分类</label>
+          <select
+            id="new-category-parent"
+            value={newCategoryParentId ?? ""}
+            onChange={(event) =>
+              setNewCategoryParentId(
+                event.currentTarget.value.length > 0
+                  ? event.currentTarget.value
+                  : null,
+              )
+            }
+          >
+            <option value="">顶级分类</option>
+            {categoryParentOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </form>
 
         <nav className="category-list" aria-label="分类列表">
-          {categories.map((category) => {
-            const workCount = state.library.works.filter(
-              (work) => work.categoryId === category.id,
-            ).length;
-            const rankingCount = state.library.rankings.filter(
-              (ranking) => ranking.categoryId === category.id,
-            ).length;
-            const tierListCount = state.library.tierLists.filter(
-              (tierList) => tierList.categoryId === category.id,
-            ).length;
-            const selected = category.id === state.selectedCategoryId;
-
-            return (
-              <button
-                key={category.id}
-                className={
-                  selected ? "category-button selected" : "category-button"
-                }
-                type="button"
-                onClick={() => controller.selectCategory(category.id)}
-              >
-                <span>{category.name}</span>
-                <small>
-                  {workCount} 作品 · {rankingCount} 排行 · {tierListCount} 分级
-                </small>
-              </button>
-            );
-          })}
+          {renderCategoryNodes(categoryTree)}
         </nav>
       </aside>
 
@@ -642,6 +790,16 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
           <div>
             <p className="eyebrow">Library</p>
             <h2>{selectedCategory?.name ?? "创建第一个分类"}</h2>
+            {selectedCategory ? (
+              <p className="workspace-path">{selectedCategoryPath}</p>
+            ) : null}
+            {selectedRootCategory &&
+            selectedCategory &&
+            selectedRootCategory.id !== selectedCategory.id ? (
+              <p className="workspace-note">
+                评分维度和排行由「{selectedRootCategory.name}」共享。
+              </p>
+            ) : null}
           </div>
           <button
             className="text-button"
@@ -694,9 +852,16 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                         </button>
                       </div>
                     </form>
+                    {selectedRootCategory &&
+                    selectedRootCategory.id !== selectedCategory.id ? (
+                      <p className="inline-hint">
+                        这个子分类共用「{selectedRootCategory.name}
+                        」的评分维度与排行。
+                      </p>
+                    ) : null}
                     <CategoryDimensionEditor
-                      key={`${selectedCategory.id}-${selectedCategory.updatedAt}`}
-                      category={selectedCategory}
+                      key={`${selectedRootCategory?.id ?? selectedCategory.id}-${selectedRootCategory?.updatedAt ?? selectedCategory.updatedAt}`}
+                      category={selectedRootCategory ?? selectedCategory}
                       onSave={handleSaveCategoryDimensions}
                     />
                   </>
@@ -734,9 +899,56 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   </div>
                 </form>
 
+                <div className="tag-filter-bar" aria-label="标签筛选">
+                  <div className="tag-filter-heading">
+                    <Filter aria-hidden="true" size={16} />
+                    <h4>标签筛选</h4>
+                    <small>{activeTagFilters.length} 已选</small>
+                  </div>
+                  {categoryTagOptions.length > 0 ? (
+                    <div className="tag-chip-row">
+                      {categoryTagOptions.map((tag) => {
+                        const selected = activeTagFilters.includes(tag.value);
+
+                        return (
+                          <button
+                            key={tag.value}
+                            className={
+                              selected ? "tag-chip selected" : "tag-chip"
+                            }
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => toggleTagFilter(tag.value)}
+                          >
+                            <Tag aria-hidden="true" size={14} />
+                            <span>{tag.value}</span>
+                            <small>{tag.count}</small>
+                          </button>
+                        );
+                      })}
+                      {activeTagFilters.length > 0 ? (
+                        <button
+                          className="text-button"
+                          type="button"
+                          onClick={() => setSelectedTagFilters([])}
+                        >
+                          <X aria-hidden="true" size={16} />
+                          清除筛选
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="inline-hint">
+                      当前分类树还没有可筛选的标签。
+                    </p>
+                  )}
+                </div>
+
                 <div className="work-list" aria-label="作品列表">
-                  {categoryWorks.length > 0 ? (
-                    categoryWorks.map((work) => (
+                  {categoryWorks.length === 0 ? (
+                    <p className="muted">这个分类还没有作品。</p>
+                  ) : visibleWorks.length > 0 ? (
+                    visibleWorks.map((work) => (
                       <button
                         key={work.id}
                         className={
@@ -752,12 +964,15 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                           {work.finalScore === null
                             ? "未评分"
                             : `${work.finalScore} 分`}
+                          {work.tags.length > 0
+                            ? ` · ${work.tags.join(" · ")}`
+                            : ""}
                           {work.shortReview ? ` · ${work.shortReview}` : ""}
                         </small>
                       </button>
                     ))
                   ) : (
-                    <p className="muted">这个分类还没有作品。</p>
+                    <p className="muted">当前标签筛选没有匹配作品。</p>
                   )}
                 </div>
               </section>
@@ -967,8 +1182,8 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   <TierListEditor
                     key={`${selectedTierList.id}-${selectedTierList.updatedAt}`}
                     tierList={selectedTierList}
-                    works={categoryWorks}
-                    coverImageUrls={coverImageUrls}
+                    works={sharedCategoryWorks}
+                    coverImageUrls={sharedCoverImageUrls}
                     onSave={handleSaveTierList}
                     onDelete={handleDeleteTierList}
                     onMoveWork={handleMoveTierListWork}
@@ -1019,7 +1234,9 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   <WorkEditor
                     key={`${selectedWork.id}-${selectedWork.updatedAt}`}
                     work={selectedWork}
-                    categoryName={selectedCategory?.name ?? ""}
+                    categoryName={
+                      selectedCategoryPath || (selectedCategory?.name ?? "")
+                    }
                     coverImageUrl={coverImageUrls.get(selectedWork.id) ?? null}
                     onSave={handleSaveWork}
                     onDelete={handleDeleteWork}
@@ -1348,6 +1565,7 @@ interface RatingDimensionDraftState {
 
 interface WorkDraft {
   title: string;
+  tagsText: string;
   shortReview: string;
   longReview: string;
 }
@@ -1363,6 +1581,7 @@ function WorkEditor({
 }: WorkEditorProps) {
   const [workDraft, setWorkDraft] = useState<WorkDraft>(() => ({
     title: work.title,
+    tagsText: work.tags.join(", "),
     shortReview: work.shortReview,
     longReview: work.longReview,
   }));
@@ -1389,7 +1608,10 @@ function WorkEditor({
     setDraftError(null);
 
     await onSave({
-      ...workDraft,
+      title: workDraft.title,
+      tags: parseTagText(workDraft.tagsText),
+      shortReview: workDraft.shortReview,
+      longReview: workDraft.longReview,
       ratingDimensions: dimensionState.ratingDimensions,
     });
   }
@@ -1457,6 +1679,17 @@ function WorkEditor({
         }
       />
 
+      <label htmlFor="work-tags">标签</label>
+      <input
+        id="work-tags"
+        name="workTags"
+        value={workDraft.tagsText}
+        onChange={(event) =>
+          updateWorkDraft("tagsText", event.currentTarget.value)
+        }
+        placeholder="新番, 2026年1月, 原创"
+      />
+
       <div className="cover-row">
         <div className="cover-preview">
           {coverImageUrl ? (
@@ -1491,6 +1724,15 @@ function WorkEditor({
           <small>
             {work.finalScore === null ? "未评分" : `${work.finalScore} 分`}
           </small>
+          {work.tags.length > 0 ? (
+            <div className="tag-chip-row compact">
+              {work.tags.map((tag) => (
+                <span className="tag-pill" key={tag}>
+                  {tag}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {work.shortReview ? <p>{work.shortReview}</p> : null}
         </div>
       </div>
@@ -2266,6 +2508,100 @@ function countTierListWorks(tierList: TierList): number {
     (count, level) => count + level.workIds.length,
     0,
   );
+}
+
+interface CategoryTreeOption {
+  id: string;
+  label: string;
+}
+
+interface TagOption {
+  value: string;
+  count: number;
+}
+
+function flattenCategoryTreeOptions(
+  nodes: CategoryTreeNode[],
+  lineage: string[] = [],
+): CategoryTreeOption[] {
+  return nodes.flatMap((node) => {
+    const nextLineage = [...lineage, node.category.name];
+
+    return [
+      {
+        id: node.category.id,
+        label: nextLineage.join(" / "),
+      },
+      ...flattenCategoryTreeOptions(node.children, nextLineage),
+    ];
+  });
+}
+
+function collectTagOptions(works: Work[]): TagOption[] {
+  const tagByKey = new Map<string, TagOption>();
+
+  for (const work of works) {
+    for (const tag of work.tags) {
+      const trimmedTag = tag.trim();
+
+      if (trimmedTag.length === 0) {
+        continue;
+      }
+
+      const key = normalizeTagKey(trimmedTag);
+      const current = tagByKey.get(key);
+
+      tagByKey.set(key, {
+        value: current?.value ?? trimmedTag,
+        count: (current?.count ?? 0) + 1,
+      });
+    }
+  }
+
+  return [...tagByKey.values()].sort((left, right) => {
+    if (left.count !== right.count) {
+      return right.count - left.count;
+    }
+
+    return left.value.localeCompare(right.value);
+  });
+}
+
+function matchesTagFilters(tags: string[], filters: string[]): boolean {
+  if (filters.length === 0) {
+    return true;
+  }
+
+  const tagKeys = new Set(tags.map(normalizeTagKey));
+  return filters.every((filter) => tagKeys.has(normalizeTagKey(filter)));
+}
+
+function parseTagText(value: string): string[] {
+  const seen = new Set<string>();
+  const tags: string[] = [];
+
+  for (const rawTag of value.split(/[,\n，、;；]+/)) {
+    const tag = rawTag.trim();
+
+    if (tag.length === 0) {
+      continue;
+    }
+
+    const key = normalizeTagKey(tag);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    tags.push(tag);
+  }
+
+  return tags;
+}
+
+function normalizeTagKey(value: string): string {
+  return value.trim().toLocaleLowerCase();
 }
 
 function useCoverImageUrls(

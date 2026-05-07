@@ -20,6 +20,7 @@ export interface RatingDimensionScore {
 
 export interface Category {
   id: EntityId;
+  parentCategoryId: EntityId | null;
   name: string;
   createdAt: IsoDateString;
   updatedAt: IsoDateString;
@@ -31,6 +32,7 @@ export interface Work {
   categoryId: EntityId;
   title: string;
   coverImagePath: string | null;
+  tags: string[];
   shortReview: string;
   longReview: string;
   ratingDimensions: RatingDimensionScore[];

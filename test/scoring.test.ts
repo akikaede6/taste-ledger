@@ -27,6 +27,7 @@ describe("scoring", () => {
       categoryId: "cat-film",
       title: "作品 A",
       coverImagePath: null,
+      tags: [],
       shortReview: "",
       longReview: "",
       ratingDimensions: [

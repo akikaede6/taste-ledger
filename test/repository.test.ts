@@ -19,6 +19,7 @@ function sampleLibrary(): Library {
     categories: [
       {
         id: "cat-film",
+        parentCategoryId: null,
         name: "影视作品",
         createdAt: now,
         updatedAt: now,
@@ -31,6 +32,7 @@ function sampleLibrary(): Library {
         categoryId: "cat-film",
         title: "作品 A",
         coverImagePath: "images/work-a.png",
+        tags: [],
         shortReview: "",
         longReview: "",
         ratingDimensions: [],

@@ -1,4 +1,5 @@
 import type { Library, Ranking, RatingDimensionTemplate, Work } from "./model";
+import { getCategoryDescendantIds } from "./category-tree";
 
 export interface RankingDimensionOption {
   id: string;
@@ -29,8 +30,11 @@ export function buildRankingWorkIds(
   library: Library,
   ranking: Pick<Ranking, "mode" | "dimensionId" | "workIds" | "categoryId">,
 ): string[] {
-  const categoryWorks = library.works.filter(
-    (work) => work.categoryId === ranking.categoryId,
+  const categoryScopeIds = new Set(
+    getCategoryDescendantIds(library, ranking.categoryId),
+  );
+  const categoryWorks = library.works.filter((work) =>
+    categoryScopeIds.has(work.categoryId),
   );
 
   if (ranking.mode === "manual") {
@@ -53,16 +57,19 @@ export function getRankingWorks(
   const workById = new Map(
     library.works.map((work) => [work.id, work] as const),
   );
+  const categoryScopeIds = new Set(
+    getCategoryDescendantIds(library, ranking.categoryId),
+  );
 
   if (ranking.mode === "manual") {
     return ranking.workIds.flatMap((workId) => {
       const work = workById.get(workId);
-      return work && work.categoryId === ranking.categoryId ? [work] : [];
+      return work && categoryScopeIds.has(work.categoryId) ? [work] : [];
     });
   }
 
-  const categoryWorks = library.works.filter(
-    (work) => work.categoryId === ranking.categoryId,
+  const categoryWorks = library.works.filter((work) =>
+    categoryScopeIds.has(work.categoryId),
   );
 
   return sortWorksForRanking(categoryWorks, ranking);

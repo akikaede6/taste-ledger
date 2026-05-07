@@ -10,18 +10,25 @@ import type {
   TierList,
   Work,
 } from "./model";
+import {
+  getCategoryAncestorIds,
+  getCategoryDescendantIds,
+  getCategoryRootId,
+} from "./category-tree";
 import { DEFAULT_TIER_LEVELS as DEFAULT_TIER_LEVEL_DEFINITIONS } from "./model";
 import { buildRankingWorkIds } from "./ranking";
 import { recalculateWorkScore } from "./scoring";
 
 export interface CategoryInput {
   name: string;
+  parentCategoryId?: string | null;
 }
 
 export interface WorkInput {
   categoryId: string;
   title: string;
   coverImagePath?: string | null;
+  tags?: string[];
   shortReview?: string;
   longReview?: string;
 }
@@ -29,6 +36,7 @@ export interface WorkInput {
 export interface WorkUpdateInput {
   title?: string;
   coverImagePath?: string | null;
+  tags?: string[];
   shortReview?: string;
   longReview?: string;
   ratingDimensions?: RatingDimensionScore[];
@@ -64,18 +72,28 @@ export function createCategory(
   const next = cloneLibrary(library);
   const now = new Date().toISOString();
   const name = input.name.trim();
+  const parentCategoryId = input.parentCategoryId ?? null;
 
   if (name.length === 0) {
     throw new Error("Category name cannot be empty.");
   }
 
+  if (parentCategoryId && !findCategory(next, parentCategoryId)) {
+    throw new Error("Parent category not found.");
+  }
+
   next.categories.push({
     id: crypto.randomUUID(),
+    parentCategoryId,
     name,
     createdAt: now,
     updatedAt: now,
     ratingDimensionTemplates: [],
   });
+
+  if (parentCategoryId) {
+    touchCategoryPath(next, parentCategoryId, now);
+  }
 
   return next;
 }
@@ -109,7 +127,8 @@ export function updateCategoryRatingDimensions(
   templates: RatingDimensionTemplate[],
 ): Library {
   const next = cloneLibrary(library);
-  const category = findCategory(next, categoryId);
+  const rootCategoryId = getCategoryRootId(next, categoryId) ?? categoryId;
+  const category = findCategory(next, rootCategoryId);
   const now = new Date().toISOString();
 
   if (!category) {
@@ -120,8 +139,10 @@ export function updateCategoryRatingDimensions(
   category.ratingDimensionTemplates = normalizedTemplates;
   category.updatedAt = now;
 
+  const categoryScopeIds = new Set(getCategoryDescendantIds(next, category.id));
+
   next.works = next.works.map((work) =>
-    work.categoryId === category.id
+    categoryScopeIds.has(work.categoryId)
       ? recalculateWorkScore({
           ...work,
           ratingDimensions: syncWorkDimensionsWithCategory(
@@ -135,22 +156,64 @@ export function updateCategoryRatingDimensions(
 
   retargetDimensionRankings(next, category.id, normalizedTemplates, now);
   refreshCategoryRankings(next, category.id, now);
+  touchCategoryPath(next, category.id, now);
 
   return next;
 }
 
 export function deleteCategory(library: Library, categoryId: string): Library {
   const next = cloneLibrary(library);
+  const category = findCategory(next, categoryId);
+  const now = new Date().toISOString();
+
+  if (!category) {
+    throw new Error("Category not found.");
+  }
+
+  const rootCategoryId = getCategoryRootId(next, categoryId) ?? categoryId;
+  const subtreeCategoryIds = new Set(
+    getCategoryDescendantIds(next, categoryId),
+  );
+  const subtreeWorkIds = new Set(
+    next.works
+      .filter((work) => subtreeCategoryIds.has(work.categoryId))
+      .map((work) => work.id),
+  );
+
   next.categories = next.categories.filter(
-    (category) => category.id !== categoryId,
+    (item) => !subtreeCategoryIds.has(item.id),
   );
-  next.works = next.works.filter((work) => work.categoryId !== categoryId);
-  next.rankings = next.rankings.filter(
-    (ranking) => ranking.categoryId !== categoryId,
+  next.works = next.works.filter(
+    (work) => !subtreeCategoryIds.has(work.categoryId),
   );
-  next.tierLists = next.tierLists.filter(
-    (tierList) => tierList.categoryId !== categoryId,
-  );
+  next.tierLists = next.tierLists
+    .filter((tierList) => !subtreeCategoryIds.has(tierList.categoryId))
+    .map((tierList) => {
+      const levels = tierList.levels.map((level) => ({
+        ...level,
+        workIds: level.workIds.filter((workId) => !subtreeWorkIds.has(workId)),
+      }));
+      const changed = levels.some(
+        (level, index) =>
+          !sameIdList(level.workIds, tierList.levels[index]?.workIds ?? []),
+      );
+
+      return {
+        ...tierList,
+        levels,
+        updatedAt: changed ? now : tierList.updatedAt,
+      };
+    });
+
+  if (category.parentCategoryId === null) {
+    next.rankings = next.rankings.filter(
+      (ranking) => ranking.categoryId !== categoryId,
+    );
+    return next;
+  }
+
+  refreshCategoryRankings(next, rootCategoryId, now);
+  touchCategoryPath(next, category.parentCategoryId, now);
   return next;
 }
 
@@ -160,10 +223,16 @@ export function createWork(
 ): { library: Library; work: Work } {
   const next = cloneLibrary(library);
   const category = findCategory(next, input.categoryId);
+  const rootCategoryId = category
+    ? (getCategoryRootId(next, category.id) ?? category.id)
+    : null;
+  const sharedCategory = rootCategoryId
+    ? findCategory(next, rootCategoryId)
+    : undefined;
   const now = new Date().toISOString();
   const title = input.title.trim();
 
-  if (!category) {
+  if (!category || !sharedCategory) {
     throw new Error("Category not found.");
   }
 
@@ -176,11 +245,12 @@ export function createWork(
     categoryId: category.id,
     title,
     coverImagePath: input.coverImagePath ?? null,
+    tags: normalizeTags(input.tags ?? []),
     shortReview: input.shortReview ?? "",
     longReview: input.longReview ?? "",
     ratingDimensions: syncWorkDimensionsWithCategory(
       [],
-      category.ratingDimensionTemplates,
+      sharedCategory.ratingDimensionTemplates,
     ),
     finalScore: null,
     createdAt: now,
@@ -188,8 +258,8 @@ export function createWork(
   });
 
   next.works.push(work);
-  category.updatedAt = now;
-  refreshCategoryRankings(next, category.id, now, {
+  touchCategoryPath(next, category.id, now);
+  refreshCategoryRankings(next, sharedCategory.id, now, {
     addedWorkId: work.id,
   });
 
@@ -213,8 +283,14 @@ export function updateWork(
   }
 
   const category = findCategory(next, work.categoryId);
+  const rootCategoryId = category
+    ? (getCategoryRootId(next, category.id) ?? category.id)
+    : null;
+  const sharedCategory = rootCategoryId
+    ? findCategory(next, rootCategoryId)
+    : undefined;
 
-  if (!category) {
+  if (!category || !sharedCategory) {
     throw new Error("Work category not found.");
   }
 
@@ -232,6 +308,10 @@ export function updateWork(
     work.coverImagePath = input.coverImagePath;
   }
 
+  if (input.tags !== undefined) {
+    work.tags = normalizeTags(input.tags);
+  }
+
   if (input.shortReview !== undefined) {
     work.shortReview = input.shortReview;
   }
@@ -243,12 +323,12 @@ export function updateWork(
   if (input.ratingDimensions !== undefined) {
     work.ratingDimensions = normalizeWorkScoresForCategory(
       input.ratingDimensions,
-      category.ratingDimensionTemplates,
+      sharedCategory.ratingDimensionTemplates,
     );
   } else {
     work.ratingDimensions = syncWorkDimensionsWithCategory(
       work.ratingDimensions,
-      category.ratingDimensionTemplates,
+      sharedCategory.ratingDimensionTemplates,
     );
   }
 
@@ -257,8 +337,8 @@ export function updateWork(
     updatedAt: now,
   });
   Object.assign(work, updatedWork);
-  touchCategory(next, work.categoryId, now);
-  refreshCategoryRankings(next, work.categoryId, now);
+  touchCategoryPath(next, work.categoryId, now);
+  refreshCategoryRankings(next, sharedCategory.id, now);
 
   return next;
 }
@@ -274,7 +354,7 @@ export function deleteWork(library: Library, workId: string): Library {
 
   next.works = next.works.filter((item) => item.id !== workId);
   next.tierLists = next.tierLists.map((tierList) =>
-    tierList.categoryId === work.categoryId
+    isCategoryInScope(next, tierList.categoryId, work.categoryId)
       ? {
           ...tierList,
           levels: tierList.levels.map((level) => ({
@@ -285,10 +365,15 @@ export function deleteWork(library: Library, workId: string): Library {
         }
       : tierList,
   );
-  touchCategory(next, work.categoryId, now);
-  refreshCategoryRankings(next, work.categoryId, now, {
-    removedWorkId: workId,
-  });
+  touchCategoryPath(next, work.categoryId, now);
+  refreshCategoryRankings(
+    next,
+    getCategoryRootId(next, work.categoryId) ?? work.categoryId,
+    now,
+    {
+      removedWorkId: workId,
+    },
+  );
 
   return next;
 }
@@ -299,10 +384,16 @@ export function createRanking(
 ): { library: Library; ranking: Ranking } {
   const next = cloneLibrary(library);
   const category = findCategory(next, input.categoryId);
+  const rootCategoryId = category
+    ? (getCategoryRootId(next, category.id) ?? category.id)
+    : null;
+  const sharedCategory = rootCategoryId
+    ? findCategory(next, rootCategoryId)
+    : undefined;
   const now = new Date().toISOString();
   const name = input.name.trim();
 
-  if (!category) {
+  if (!category || !sharedCategory) {
     throw new Error("Category not found.");
   }
 
@@ -312,7 +403,7 @@ export function createRanking(
 
   const ranking: Ranking = {
     id: crypto.randomUUID(),
-    categoryId: category.id,
+    categoryId: sharedCategory.id,
     name,
     mode: input.mode,
     dimensionId:
@@ -325,7 +416,7 @@ export function createRanking(
   validateRankingInput(ranking, next);
   ranking.workIds = buildRankingWorkIds(next, ranking);
   next.rankings.push(ranking);
-  category.updatedAt = now;
+  touchCategoryPath(next, category.id, now);
 
   return {
     library: next,
@@ -369,7 +460,7 @@ export function updateRanking(
   validateRankingInput(ranking, next);
   ranking.workIds = buildRankingWorkIds(next, ranking);
   ranking.updatedAt = now;
-  touchCategory(next, ranking.categoryId, now);
+  touchCategoryPath(next, ranking.categoryId, now);
 
   return next;
 }
@@ -383,7 +474,7 @@ export function deleteRanking(library: Library, rankingId: string): Library {
   }
 
   next.rankings = next.rankings.filter((item) => item.id !== rankingId);
-  touchCategory(next, ranking.categoryId, new Date().toISOString());
+  touchCategoryPath(next, ranking.categoryId, new Date().toISOString());
 
   return next;
 }
@@ -424,7 +515,7 @@ export function moveRankingWork(
 
   ranking.workIds = workIds;
   ranking.updatedAt = now;
-  touchCategory(next, ranking.categoryId, now);
+  touchCategoryPath(next, ranking.categoryId, now);
 
   return next;
 }
@@ -435,10 +526,16 @@ export function createTierList(
 ): { library: Library; tierList: TierList } {
   const next = cloneLibrary(library);
   const category = findCategory(next, input.categoryId);
+  const rootCategoryId = category
+    ? (getCategoryRootId(next, category.id) ?? category.id)
+    : null;
+  const sharedCategory = rootCategoryId
+    ? findCategory(next, rootCategoryId)
+    : undefined;
   const now = new Date().toISOString();
   const name = input.name.trim();
 
-  if (!category) {
+  if (!category || !sharedCategory) {
     throw new Error("Category not found.");
   }
 
@@ -448,7 +545,7 @@ export function createTierList(
 
   const tierList: TierList = {
     id: crypto.randomUUID(),
-    categoryId: category.id,
+    categoryId: sharedCategory.id,
     name,
     levels: createDefaultTierLevels(),
     createdAt: now,
@@ -456,7 +553,7 @@ export function createTierList(
   };
 
   next.tierLists.push(tierList);
-  category.updatedAt = now;
+  touchCategoryPath(next, category.id, now);
 
   return {
     library: next,
@@ -496,7 +593,7 @@ export function updateTierList(
   }
 
   tierList.updatedAt = now;
-  touchCategory(next, tierList.categoryId, now);
+  touchCategoryPath(next, tierList.categoryId, now);
 
   return next;
 }
@@ -510,7 +607,7 @@ export function deleteTierList(library: Library, tierListId: string): Library {
   }
 
   next.tierLists = next.tierLists.filter((item) => item.id !== tierListId);
-  touchCategory(next, tierList.categoryId, new Date().toISOString());
+  touchCategoryPath(next, tierList.categoryId, new Date().toISOString());
 
   return next;
 }
@@ -531,7 +628,7 @@ export function moveTierListWork(
 
   const work = findWork(next, workId);
 
-  if (!work || work.categoryId !== tierList.categoryId) {
+  if (!work || !isCategoryInScope(next, tierList.categoryId, work.categoryId)) {
     throw new Error("Tier list work must belong to the same category.");
   }
 
@@ -550,7 +647,7 @@ export function moveTierListWork(
     };
   });
   tierList.updatedAt = now;
-  touchCategory(next, tierList.categoryId, now);
+  touchCategoryPath(next, tierList.categoryId, now);
 
   return next;
 }
@@ -573,7 +670,7 @@ export function removeTierListWork(
     workIds: level.workIds.filter((item) => item !== workId),
   }));
   tierList.updatedAt = now;
-  touchCategory(next, tierList.categoryId, now);
+  touchCategoryPath(next, tierList.categoryId, now);
 
   return next;
 }
@@ -620,6 +717,14 @@ function touchCategory(library: Library, categoryId: string, now: string) {
   }
 }
 
+function touchCategoryPath(library: Library, categoryId: string, now: string) {
+  touchCategory(library, categoryId, now);
+
+  for (const ancestorId of getCategoryAncestorIds(library, categoryId)) {
+    touchCategory(library, ancestorId, now);
+  }
+}
+
 function findRanking(library: Library, rankingId: string): Ranking | undefined {
   return library.rankings.find((ranking) => ranking.id === rankingId);
 }
@@ -637,8 +742,11 @@ function refreshCategoryRankings(
   now: string,
   options: { addedWorkId?: string; removedWorkId?: string } = {},
 ) {
-  const categoryWorks = library.works.filter(
-    (work) => work.categoryId === categoryId,
+  const categoryScopeIds = new Set(
+    getCategoryDescendantIds(library, categoryId),
+  );
+  const categoryWorks = library.works.filter((work) =>
+    categoryScopeIds.has(work.categoryId),
   );
   const workIds = new Set(categoryWorks.map((work) => work.id));
 
@@ -714,8 +822,11 @@ function validateRankingInput(ranking: Ranking, library: Library) {
     }
   }
 
-  const categoryWorks = library.works.filter(
-    (work) => work.categoryId === ranking.categoryId,
+  const categoryScopeIds = new Set(
+    getCategoryDescendantIds(library, ranking.categoryId),
+  );
+  const categoryWorks = library.works.filter((work) =>
+    categoryScopeIds.has(work.categoryId),
   );
 
   if (ranking.mode === "manual" && categoryWorks.length === 0) {
@@ -855,7 +966,7 @@ function normalizeTierLevels(
 ): TierLevel[] {
   const worksInCategory = new Set(
     library.works
-      .filter((work) => work.categoryId === categoryId)
+      .filter((work) => isCategoryInScope(library, categoryId, work.categoryId))
       .map((work) => work.id),
   );
   const levelById = new Map(levels.map((level) => [level.id, level]));
@@ -885,4 +996,39 @@ function normalizeTierLevels(
       workIds,
     };
   });
+}
+
+function normalizeTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const rawTag of tags) {
+    const tag = rawTag.trim();
+
+    if (tag.length === 0) {
+      continue;
+    }
+
+    const key = tag.toLocaleLowerCase();
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    normalized.push(tag);
+  }
+
+  return normalized;
+}
+
+function isCategoryInScope(
+  library: Library,
+  scopeCategoryId: string,
+  categoryId: string,
+): boolean {
+  return (
+    scopeCategoryId === categoryId ||
+    getCategoryAncestorIds(library, categoryId).includes(scopeCategoryId)
+  );
 }

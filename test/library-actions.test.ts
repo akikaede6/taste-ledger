@@ -30,6 +30,7 @@ function libraryWithCategory(): Library {
     categories: [
       {
         id: "cat-film",
+        parentCategoryId: null,
         name: "影视作品",
         createdAt: now,
         updatedAt: now,
@@ -53,6 +54,7 @@ function libraryWithCategory(): Library {
         categoryId: "cat-film",
         title: "作品 A",
         coverImagePath: null,
+        tags: [],
         shortReview: "",
         longReview: "",
         ratingDimensions: [],
@@ -65,6 +67,7 @@ function libraryWithCategory(): Library {
         categoryId: "cat-other",
         title: "作品 B",
         coverImagePath: null,
+        tags: [],
         shortReview: "",
         longReview: "",
         ratingDimensions: [],
@@ -110,6 +113,7 @@ function rankingLibrary(): Library {
     categories: [
       {
         id: "cat-film",
+        parentCategoryId: null,
         name: "影视作品",
         createdAt: now,
         updatedAt: now,
@@ -128,6 +132,7 @@ function rankingLibrary(): Library {
         categoryId: "cat-film",
         title: "作品 A",
         coverImagePath: null,
+        tags: [],
         shortReview: "",
         longReview: "",
         ratingDimensions: [
@@ -147,6 +152,7 @@ function rankingLibrary(): Library {
         categoryId: "cat-film",
         title: "作品 B",
         coverImagePath: null,
+        tags: [],
         shortReview: "",
         longReview: "",
         ratingDimensions: [
@@ -166,6 +172,7 @@ function rankingLibrary(): Library {
         categoryId: "cat-film",
         title: "作品 C",
         coverImagePath: null,
+        tags: [],
         shortReview: "",
         longReview: "",
         ratingDimensions: [
@@ -274,6 +281,107 @@ describe("category actions", () => {
         weight: 1,
       },
     ]);
+  });
+
+  it("shares dimensions, rankings, and tier lists across subcategories", () => {
+    vi.setSystemTime(new Date(rankingNow));
+
+    let library = createCategory(createEmptyLibrary(), { name: "动画" });
+    const rootCategory = library.categories[0];
+
+    library = updateCategoryRatingDimensions(library, rootCategory.id, [
+      {
+        id: "story",
+        name: "剧情",
+        weight: 1,
+      },
+    ]);
+    library = createCategory(library, {
+      name: "2026年1月新番",
+      parentCategoryId: rootCategory.id,
+    });
+
+    const childCategory = library.categories.find(
+      (category) => category.parentCategoryId === rootCategory.id,
+    );
+
+    expect(childCategory).toBeDefined();
+
+    if (!childCategory) {
+      throw new Error("Expected child category.");
+    }
+
+    const createdWork = createWork(library, {
+      categoryId: childCategory.id,
+      title: "作品 D",
+      tags: [" 新番 ", "原创", "新番"],
+    });
+
+    expect(createdWork.work.categoryId).toBe(childCategory.id);
+    expect(createdWork.work.tags).toEqual(["新番", "原创"]);
+    expect(createdWork.work.ratingDimensions).toEqual([
+      {
+        id: "story",
+        name: "剧情",
+        score: 0,
+        weight: 1,
+      },
+    ]);
+
+    const createdRanking = createRanking(createdWork.library, {
+      categoryId: childCategory.id,
+      name: "总排行",
+      mode: "finalScore",
+    });
+
+    expect(createdRanking.ranking.categoryId).toBe(rootCategory.id);
+    expect(createdRanking.ranking.workIds).toEqual([createdWork.work.id]);
+
+    const createdTierList = createTierList(createdRanking.library, {
+      categoryId: childCategory.id,
+      name: "五级分级",
+    });
+
+    expect(createdTierList.tierList.categoryId).toBe(rootCategory.id);
+  });
+
+  it("removes child category works from shared tier lists", () => {
+    vi.setSystemTime(new Date(rankingNow));
+
+    let library = createCategory(createEmptyLibrary(), { name: "动画" });
+    const rootCategory = library.categories[0];
+    library = createCategory(library, {
+      name: "2026年1月新番",
+      parentCategoryId: rootCategory.id,
+    });
+    const childCategory = library.categories.find(
+      (category) => category.parentCategoryId === rootCategory.id,
+    );
+
+    if (!childCategory) {
+      throw new Error("Expected child category.");
+    }
+
+    const createdWork = createWork(library, {
+      categoryId: childCategory.id,
+      title: "作品 D",
+    });
+    const createdTierList = createTierList(createdWork.library, {
+      categoryId: childCategory.id,
+      name: "五级分级",
+    });
+    const moved = moveTierListWork(
+      createdTierList.library,
+      createdTierList.tierList.id,
+      createdWork.work.id,
+      "tier-1",
+    );
+
+    const next = deleteCategory(moved, childCategory.id);
+
+    expect(next.works).toEqual([]);
+    expect(next.tierLists[0].levels[0].workIds).toEqual([]);
+    expect(next.tierLists[0].updatedAt).toBe(rankingNow);
   });
 
   it("updates work title and reviews independently", () => {

@@ -33,6 +33,7 @@ import {
 } from "./library-actions";
 import { getRankingWorks } from "./ranking";
 import { createDisplayImageDataUrl } from "./image-utils";
+import { getCategoryDescendantIds, getCategoryRootId } from "./category-tree";
 import {
   createRankingShareImage,
   createTierListShareImage,
@@ -59,7 +60,7 @@ export interface LibraryController {
   selectWork(workId: string | null): void;
   selectRanking(rankingId: string | null): void;
   selectTierList(tierListId: string | null): void;
-  createCategory(name: string): Promise<void>;
+  createCategory(name: string, parentCategoryId?: string | null): Promise<void>;
   renameSelectedCategory(name: string): Promise<void>;
   updateSelectedCategoryRatingDimensions(
     templates: RatingDimensionTemplate[],
@@ -121,63 +122,37 @@ export function createLibraryController(
     | "selectedRankingId"
     | "selectedTierListId"
   > {
-    const categoryId =
-      state.selectedCategoryId &&
-      library.categories.some(
-        (category) => category.id === state.selectedCategoryId,
-      )
-        ? state.selectedCategoryId
-        : (library.categories[0]?.id ?? null);
-
-    const workId =
-      state.selectedWorkId &&
-      library.works.some(
-        (work) =>
-          work.id === state.selectedWorkId && work.categoryId === categoryId,
-      )
-        ? state.selectedWorkId
-        : categoryId
-          ? (library.works.find((work) => work.categoryId === categoryId)?.id ??
-            null)
-          : null;
-
-    const rankingId =
-      state.selectedRankingId &&
-      library.rankings.some(
-        (ranking) =>
-          ranking.id === state.selectedRankingId &&
-          ranking.categoryId === categoryId,
-      )
-        ? state.selectedRankingId
-        : categoryId
-          ? (sortRankingsByRecentUpdate(
-              library.rankings.filter(
-                (ranking) => ranking.categoryId === categoryId,
-              ),
-            )[0]?.id ?? null)
-          : null;
-
-    const tierListId =
-      state.selectedTierListId &&
-      library.tierLists.some(
-        (tierList) =>
-          tierList.id === state.selectedTierListId &&
-          tierList.categoryId === categoryId,
-      )
-        ? state.selectedTierListId
-        : categoryId
-          ? (sortTierListsByRecentUpdate(
-              library.tierLists.filter(
-                (tierList) => tierList.categoryId === categoryId,
-              ),
-            )[0]?.id ?? null)
-          : null;
+    const categoryId = resolveSelectedCategoryId(
+      library,
+      state.selectedCategoryId,
+    );
+    const rootCategoryId = categoryId
+      ? (getCategoryRootId(library, categoryId) ?? categoryId)
+      : null;
+    const categoryScopeIds = categoryId
+      ? new Set(getCategoryDescendantIds(library, categoryId))
+      : new Set<string>();
+    const selectedWorkId = resolveSelectedWorkId(
+      library,
+      categoryScopeIds,
+      state.selectedWorkId,
+    );
+    const selectedRankingId = resolveSharedRankingId(
+      library,
+      rootCategoryId,
+      state.selectedRankingId,
+    );
+    const selectedTierListId = resolveSharedTierListId(
+      library,
+      rootCategoryId,
+      state.selectedTierListId,
+    );
 
     return {
       selectedCategoryId: categoryId,
-      selectedWorkId: workId,
-      selectedRankingId: rankingId,
-      selectedTierListId: tierListId,
+      selectedWorkId,
+      selectedRankingId,
+      selectedTierListId,
     };
   }
 
@@ -258,33 +233,35 @@ export function createLibraryController(
     },
 
     selectCategory(categoryId) {
-      const selectedWorkId =
-        categoryId === null
-          ? null
-          : (state.library.works.find((work) => work.categoryId === categoryId)
-              ?.id ?? null);
-      const selectedRankingId =
-        categoryId === null
-          ? null
-          : (sortRankingsByRecentUpdate(
-              state.library.rankings.filter(
-                (ranking) => ranking.categoryId === categoryId,
-              ),
-            )[0]?.id ?? null);
-      const selectedTierListId =
-        categoryId === null
-          ? null
-          : (sortTierListsByRecentUpdate(
-              state.library.tierLists.filter(
-                (tierList) => tierList.categoryId === categoryId,
-              ),
-            )[0]?.id ?? null);
+      const selectedCategoryId = resolveSelectedCategoryId(
+        state.library,
+        categoryId,
+      );
+      const categoryScopeIds = selectedCategoryId
+        ? new Set(getCategoryDescendantIds(state.library, selectedCategoryId))
+        : new Set<string>();
+      const rootCategoryId = selectedCategoryId
+        ? (getCategoryRootId(state.library, selectedCategoryId) ??
+          selectedCategoryId)
+        : null;
       setState({
         ...state,
-        selectedCategoryId: categoryId,
-        selectedWorkId,
-        selectedRankingId,
-        selectedTierListId,
+        selectedCategoryId,
+        selectedWorkId: resolveSelectedWorkId(
+          state.library,
+          categoryScopeIds,
+          state.selectedWorkId,
+        ),
+        selectedRankingId: resolveSharedRankingId(
+          state.library,
+          rootCategoryId,
+          state.selectedRankingId,
+        ),
+        selectedTierListId: resolveSharedTierListId(
+          state.library,
+          rootCategoryId,
+          state.selectedTierListId,
+        ),
       });
     },
 
@@ -312,27 +289,39 @@ export function createLibraryController(
         return;
       }
 
+      const selectedCategoryId = resolveSelectedCategoryId(
+        state.library,
+        state.selectedCategoryId,
+      );
+      const categoryScopeIds = selectedCategoryId
+        ? new Set(getCategoryDescendantIds(state.library, selectedCategoryId))
+        : new Set<string>();
       const selectedWorkId =
         ranking.workIds.find((workId) =>
-          state.library.works.some(
-            (work) =>
-              work.id === workId && work.categoryId === ranking.categoryId,
-          ),
+          state.library.works.some((work) => {
+            if (work.id !== workId) {
+              return false;
+            }
+
+            return categoryScopeIds.has(work.categoryId);
+          }),
         ) ??
-        state.library.works.find(
-          (work) => work.categoryId === ranking.categoryId,
-        )?.id ??
-        null;
+        resolveSelectedWorkId(
+          state.library,
+          categoryScopeIds,
+          state.selectedWorkId,
+        );
 
       setState({
         ...state,
-        selectedCategoryId: ranking.categoryId,
+        selectedCategoryId,
         selectedWorkId,
         selectedRankingId: rankingId,
-        selectedTierListId:
-          state.library.tierLists.find(
-            (tierList) => tierList.categoryId === ranking.categoryId,
-          )?.id ?? null,
+        selectedTierListId: resolveSharedTierListId(
+          state.library,
+          ranking.categoryId,
+          state.selectedTierListId,
+        ),
       });
     },
 
@@ -353,25 +342,36 @@ export function createLibraryController(
         return;
       }
 
+      const selectedCategoryId = resolveSelectedCategoryId(
+        state.library,
+        state.selectedCategoryId,
+      );
+      const categoryScopeIds = selectedCategoryId
+        ? new Set(getCategoryDescendantIds(state.library, selectedCategoryId))
+        : new Set<string>();
       setState({
         ...state,
-        selectedCategoryId: tierList.categoryId,
-        selectedWorkId:
-          state.library.works.find(
-            (work) => work.categoryId === tierList.categoryId,
-          )?.id ?? null,
-        selectedRankingId:
-          sortRankingsByRecentUpdate(
-            state.library.rankings.filter(
-              (ranking) => ranking.categoryId === tierList.categoryId,
-            ),
-          )[0]?.id ?? null,
+        selectedCategoryId,
+        selectedWorkId: resolveSelectedWorkId(
+          state.library,
+          categoryScopeIds,
+          state.selectedWorkId,
+        ),
+        selectedRankingId: resolveSharedRankingId(
+          state.library,
+          tierList.categoryId,
+          state.selectedRankingId,
+        ),
         selectedTierListId: tierListId,
       });
     },
 
-    async createCategory(name) {
-      const nextLibrary = createCategoryAction(state.library, name);
+    async createCategory(name, parentCategoryId) {
+      const nextLibrary = createCategoryAction(
+        state.library,
+        name,
+        parentCategoryId,
+      );
       await saveLibrary(nextLibrary);
     },
 
@@ -393,9 +393,10 @@ export function createLibraryController(
         return;
       }
 
+      const rootCategoryId = getCategoryRootId(state.library, categoryId);
       const nextLibrary = updateCategoryRatingDimensions(
         state.library,
-        categoryId,
+        rootCategoryId ?? categoryId,
         templates,
       );
       await saveLibrary(nextLibrary);
@@ -579,21 +580,27 @@ export function createLibraryController(
         throw new Error("Category not selected.");
       }
 
+      const rootCategoryId =
+        getCategoryRootId(state.library, categoryId) ?? categoryId;
+
       const result = createRanking(state.library, {
         ...input,
-        categoryId,
+        categoryId: rootCategoryId,
       });
 
       await saveLibrary(result.library, {
         selectedCategoryId: categoryId,
-        selectedWorkId:
-          state.library.works.find((work) => work.categoryId === categoryId)
-            ?.id ?? null,
+        selectedWorkId: resolveSelectedWorkId(
+          state.library,
+          new Set(getCategoryDescendantIds(state.library, categoryId)),
+          state.selectedWorkId,
+        ),
         selectedRankingId: result.ranking.id,
-        selectedTierListId:
-          state.library.tierLists.find(
-            (tierList) => tierList.categoryId === categoryId,
-          )?.id ?? null,
+        selectedTierListId: resolveSharedTierListId(
+          state.library,
+          rootCategoryId,
+          state.selectedTierListId,
+        ),
       });
     },
 
@@ -642,20 +649,26 @@ export function createLibraryController(
         throw new Error("Category not selected.");
       }
 
+      const rootCategoryId =
+        getCategoryRootId(state.library, categoryId) ?? categoryId;
+
       const result = createTierList(state.library, {
         ...input,
-        categoryId,
+        categoryId: rootCategoryId,
       });
 
       await saveLibrary(result.library, {
         selectedCategoryId: categoryId,
-        selectedWorkId:
-          state.library.works.find((work) => work.categoryId === categoryId)
-            ?.id ?? null,
-        selectedRankingId:
-          state.library.rankings.find(
-            (ranking) => ranking.categoryId === categoryId,
-          )?.id ?? null,
+        selectedWorkId: resolveSelectedWorkId(
+          state.library,
+          new Set(getCategoryDescendantIds(state.library, categoryId)),
+          state.selectedWorkId,
+        ),
+        selectedRankingId: resolveSharedRankingId(
+          state.library,
+          rootCategoryId,
+          state.selectedRankingId,
+        ),
         selectedTierListId: result.tierList.id,
       });
     },
@@ -722,10 +735,119 @@ export function createLibraryController(
   return controller;
 }
 
-function createCategoryAction(library: Library, name: string): Library {
-  const next = createCategory(library, { name });
+function createCategoryAction(
+  library: Library,
+  name: string,
+  parentCategoryId?: string | null,
+): Library {
+  const next = createCategory(library, { name, parentCategoryId });
   next.categories = sortCategoriesByRecentUpdate(next.categories);
   return next;
+}
+
+function resolveSelectedCategoryId(
+  library: Library,
+  categoryId: string | null,
+): string | null {
+  if (
+    categoryId &&
+    library.categories.some((category) => category.id === categoryId)
+  ) {
+    return categoryId;
+  }
+
+  return (
+    library.categories.find((category) => category.parentCategoryId === null)
+      ?.id ??
+    library.categories[0]?.id ??
+    null
+  );
+}
+
+function resolveSharedRankingId(
+  library: Library,
+  rootCategoryId: string | null,
+  currentRankingId: string | null,
+): string | null {
+  if (
+    currentRankingId &&
+    library.rankings.some(
+      (ranking) =>
+        ranking.id === currentRankingId &&
+        ranking.categoryId === rootCategoryId,
+    )
+  ) {
+    return currentRankingId;
+  }
+
+  if (!rootCategoryId) {
+    return null;
+  }
+
+  return (
+    sortRankingsByRecentUpdate(
+      library.rankings.filter(
+        (ranking) => ranking.categoryId === rootCategoryId,
+      ),
+    )[0]?.id ?? null
+  );
+}
+
+function resolveSharedTierListId(
+  library: Library,
+  rootCategoryId: string | null,
+  currentTierListId: string | null,
+): string | null {
+  if (
+    currentTierListId &&
+    library.tierLists.some(
+      (tierList) =>
+        tierList.id === currentTierListId &&
+        tierList.categoryId === rootCategoryId,
+    )
+  ) {
+    return currentTierListId;
+  }
+
+  if (!rootCategoryId) {
+    return null;
+  }
+
+  return (
+    sortTierListsByRecentUpdate(
+      library.tierLists.filter(
+        (tierList) => tierList.categoryId === rootCategoryId,
+      ),
+    )[0]?.id ?? null
+  );
+}
+
+function resolveSelectedWorkId(
+  library: Library,
+  categoryScopeIds: Set<string>,
+  currentWorkId: string | null,
+): string | null {
+  if (
+    currentWorkId &&
+    library.works.some(
+      (work) =>
+        work.id === currentWorkId && categoryScopeIds.has(work.categoryId),
+    )
+  ) {
+    return currentWorkId;
+  }
+
+  return getFirstVisibleWorkId(library, categoryScopeIds);
+}
+
+function getFirstVisibleWorkId(
+  library: Library,
+  categoryScopeIds: Set<string>,
+): string | null {
+  return (
+    library.works.find((work) => categoryScopeIds.has(work.categoryId))?.id ??
+    null
+  );
 }
 
 async function buildCoverImageMap(
