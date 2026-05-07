@@ -79,6 +79,7 @@ function sampleLibrary(): Library {
         updatedAt: now,
       },
     ],
+    tierLists: [],
     exportSettings: {
       workCoverTemplate: "default",
       workLongTemplate: "default",
@@ -94,6 +95,7 @@ describe("library schema", () => {
       categories: [],
       works: [],
       rankings: [],
+      tierLists: [],
       exportSettings: {
         workCoverTemplate: "default",
         workLongTemplate: "default",

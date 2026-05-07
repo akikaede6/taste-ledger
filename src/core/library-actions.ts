@@ -4,8 +4,13 @@ import type {
   Ranking,
   RankingMode,
   RatingDimensionScore,
+  RatingDimensionTemplate,
+  TierLevel,
+  TierLevelId,
+  TierList,
   Work,
 } from "./model";
+import { DEFAULT_TIER_LEVELS as DEFAULT_TIER_LEVEL_DEFINITIONS } from "./model";
 import { buildRankingWorkIds } from "./ranking";
 import { recalculateWorkScore } from "./scoring";
 
@@ -40,6 +45,16 @@ export interface RankingUpdateInput {
   name?: string;
   mode?: RankingMode;
   dimensionId?: string | null;
+}
+
+export interface TierListInput {
+  categoryId: string;
+  name: string;
+}
+
+export interface TierListUpdateInput {
+  name?: string;
+  levels?: TierLevel[];
 }
 
 export function createCategory(
@@ -88,6 +103,42 @@ export function renameCategory(
   return next;
 }
 
+export function updateCategoryRatingDimensions(
+  library: Library,
+  categoryId: string,
+  templates: RatingDimensionTemplate[],
+): Library {
+  const next = cloneLibrary(library);
+  const category = findCategory(next, categoryId);
+  const now = new Date().toISOString();
+
+  if (!category) {
+    throw new Error("Category not found.");
+  }
+
+  const normalizedTemplates = normalizeRatingDimensionTemplates(templates);
+  category.ratingDimensionTemplates = normalizedTemplates;
+  category.updatedAt = now;
+
+  next.works = next.works.map((work) =>
+    work.categoryId === category.id
+      ? recalculateWorkScore({
+          ...work,
+          ratingDimensions: syncWorkDimensionsWithCategory(
+            work.ratingDimensions,
+            normalizedTemplates,
+          ),
+          updatedAt: now,
+        })
+      : work,
+  );
+
+  retargetDimensionRankings(next, category.id, normalizedTemplates, now);
+  refreshCategoryRankings(next, category.id, now);
+
+  return next;
+}
+
 export function deleteCategory(library: Library, categoryId: string): Library {
   const next = cloneLibrary(library);
   next.categories = next.categories.filter(
@@ -96,6 +147,9 @@ export function deleteCategory(library: Library, categoryId: string): Library {
   next.works = next.works.filter((work) => work.categoryId !== categoryId);
   next.rankings = next.rankings.filter(
     (ranking) => ranking.categoryId !== categoryId,
+  );
+  next.tierLists = next.tierLists.filter(
+    (tierList) => tierList.categoryId !== categoryId,
   );
   return next;
 }
@@ -124,12 +178,10 @@ export function createWork(
     coverImagePath: input.coverImagePath ?? null,
     shortReview: input.shortReview ?? "",
     longReview: input.longReview ?? "",
-    ratingDimensions: category.ratingDimensionTemplates.map((dimension) => ({
-      id: dimension.id,
-      name: dimension.name,
-      score: 0,
-      weight: dimension.weight,
-    })),
+    ratingDimensions: syncWorkDimensionsWithCategory(
+      [],
+      category.ratingDimensionTemplates,
+    ),
     finalScore: null,
     createdAt: now,
     updatedAt: now,
@@ -160,6 +212,12 @@ export function updateWork(
     throw new Error("Work not found.");
   }
 
+  const category = findCategory(next, work.categoryId);
+
+  if (!category) {
+    throw new Error("Work category not found.");
+  }
+
   if (input.title !== undefined) {
     const title = input.title.trim();
 
@@ -183,7 +241,15 @@ export function updateWork(
   }
 
   if (input.ratingDimensions !== undefined) {
-    work.ratingDimensions = normalizeRatingDimensions(input.ratingDimensions);
+    work.ratingDimensions = normalizeWorkScoresForCategory(
+      input.ratingDimensions,
+      category.ratingDimensionTemplates,
+    );
+  } else {
+    work.ratingDimensions = syncWorkDimensionsWithCategory(
+      work.ratingDimensions,
+      category.ratingDimensionTemplates,
+    );
   }
 
   const updatedWork = recalculateWorkScore({
@@ -207,6 +273,18 @@ export function deleteWork(library: Library, workId: string): Library {
   }
 
   next.works = next.works.filter((item) => item.id !== workId);
+  next.tierLists = next.tierLists.map((tierList) =>
+    tierList.categoryId === work.categoryId
+      ? {
+          ...tierList,
+          levels: tierList.levels.map((level) => ({
+            ...level,
+            workIds: level.workIds.filter((item) => item !== workId),
+          })),
+          updatedAt: now,
+        }
+      : tierList,
+  );
   touchCategory(next, work.categoryId, now);
   refreshCategoryRankings(next, work.categoryId, now, {
     removedWorkId: workId,
@@ -351,6 +429,155 @@ export function moveRankingWork(
   return next;
 }
 
+export function createTierList(
+  library: Library,
+  input: TierListInput,
+): { library: Library; tierList: TierList } {
+  const next = cloneLibrary(library);
+  const category = findCategory(next, input.categoryId);
+  const now = new Date().toISOString();
+  const name = input.name.trim();
+
+  if (!category) {
+    throw new Error("Category not found.");
+  }
+
+  if (name.length === 0) {
+    throw new Error("Tier list name cannot be empty.");
+  }
+
+  const tierList: TierList = {
+    id: crypto.randomUUID(),
+    categoryId: category.id,
+    name,
+    levels: createDefaultTierLevels(),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  next.tierLists.push(tierList);
+  category.updatedAt = now;
+
+  return {
+    library: next,
+    tierList,
+  };
+}
+
+export function updateTierList(
+  library: Library,
+  tierListId: string,
+  input: TierListUpdateInput,
+): Library {
+  const next = cloneLibrary(library);
+  const tierList = findTierList(next, tierListId);
+  const now = new Date().toISOString();
+
+  if (!tierList) {
+    throw new Error("Tier list not found.");
+  }
+
+  if (input.name !== undefined) {
+    const name = input.name.trim();
+
+    if (name.length === 0) {
+      throw new Error("Tier list name cannot be empty.");
+    }
+
+    tierList.name = name;
+  }
+
+  if (input.levels !== undefined) {
+    tierList.levels = normalizeTierLevels(
+      next,
+      tierList.categoryId,
+      input.levels,
+    );
+  }
+
+  tierList.updatedAt = now;
+  touchCategory(next, tierList.categoryId, now);
+
+  return next;
+}
+
+export function deleteTierList(library: Library, tierListId: string): Library {
+  const next = cloneLibrary(library);
+  const tierList = findTierList(next, tierListId);
+
+  if (!tierList) {
+    throw new Error("Tier list not found.");
+  }
+
+  next.tierLists = next.tierLists.filter((item) => item.id !== tierListId);
+  touchCategory(next, tierList.categoryId, new Date().toISOString());
+
+  return next;
+}
+
+export function moveTierListWork(
+  library: Library,
+  tierListId: string,
+  workId: string,
+  levelId: TierLevelId,
+): Library {
+  const next = cloneLibrary(library);
+  const tierList = findTierList(next, tierListId);
+  const now = new Date().toISOString();
+
+  if (!tierList) {
+    throw new Error("Tier list not found.");
+  }
+
+  const work = findWork(next, workId);
+
+  if (!work || work.categoryId !== tierList.categoryId) {
+    throw new Error("Tier list work must belong to the same category.");
+  }
+
+  if (!tierList.levels.some((level) => level.id === levelId)) {
+    throw new Error("Tier level not found.");
+  }
+
+  tierList.levels = tierList.levels.map((level) => {
+    const withoutWork = level.workIds.filter((item) => item !== workId);
+    return {
+      ...level,
+      workIds:
+        level.id === levelId && !withoutWork.includes(workId)
+          ? [...withoutWork, workId]
+          : withoutWork,
+    };
+  });
+  tierList.updatedAt = now;
+  touchCategory(next, tierList.categoryId, now);
+
+  return next;
+}
+
+export function removeTierListWork(
+  library: Library,
+  tierListId: string,
+  workId: string,
+): Library {
+  const next = cloneLibrary(library);
+  const tierList = findTierList(next, tierListId);
+  const now = new Date().toISOString();
+
+  if (!tierList) {
+    throw new Error("Tier list not found.");
+  }
+
+  tierList.levels = tierList.levels.map((level) => ({
+    ...level,
+    workIds: level.workIds.filter((item) => item !== workId),
+  }));
+  tierList.updatedAt = now;
+  touchCategory(next, tierList.categoryId, now);
+
+  return next;
+}
+
 export function sortCategoriesByRecentUpdate(
   categories: Category[],
 ): Category[] {
@@ -361,6 +588,12 @@ export function sortCategoriesByRecentUpdate(
 
 export function sortRankingsByRecentUpdate(rankings: Ranking[]): Ranking[] {
   return [...rankings].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
+}
+
+export function sortTierListsByRecentUpdate(tierLists: TierList[]): TierList[] {
+  return [...tierLists].sort((left, right) =>
     right.updatedAt.localeCompare(left.updatedAt),
   );
 }
@@ -389,6 +622,13 @@ function touchCategory(library: Library, categoryId: string, now: string) {
 
 function findRanking(library: Library, rankingId: string): Ranking | undefined {
   return library.rankings.find((ranking) => ranking.id === rankingId);
+}
+
+function findTierList(
+  library: Library,
+  tierListId: string,
+): TierList | undefined {
+  return library.tierLists.find((tierList) => tierList.id === tierListId);
 }
 
 function refreshCategoryRankings(
@@ -462,6 +702,18 @@ function validateRankingInput(ranking: Ranking, library: Library) {
     ranking.dimensionId = null;
   }
 
+  if (ranking.mode === "dimension" && ranking.dimensionId) {
+    const category = findCategory(library, ranking.categoryId);
+
+    if (
+      !category?.ratingDimensionTemplates.some(
+        (dimension) => dimension.id === ranking.dimensionId,
+      )
+    ) {
+      throw new Error("Dimension rankings require a category dimension.");
+    }
+  }
+
   const categoryWorks = library.works.filter(
     (work) => work.categoryId === ranking.categoryId,
   );
@@ -471,12 +723,12 @@ function validateRankingInput(ranking: Ranking, library: Library) {
   }
 }
 
-function normalizeRatingDimensions(
-  dimensions: RatingDimensionScore[],
-): RatingDimensionScore[] {
+function normalizeRatingDimensionTemplates(
+  templates: RatingDimensionTemplate[],
+): RatingDimensionTemplate[] {
   const seenIds = new Set<string>();
 
-  return dimensions.map((dimension, index) => {
+  return templates.map((dimension, index) => {
     const id = dimension.id.trim();
     const name = dimension.name.trim();
 
@@ -494,10 +746,6 @@ function normalizeRatingDimensions(
       throw new Error(`Rating dimension ${index + 1} name cannot be empty.`);
     }
 
-    if (!Number.isFinite(dimension.score) || dimension.score < 0) {
-      throw new Error(`Rating dimension ${index + 1} score must be valid.`);
-    }
-
     if (!Number.isFinite(dimension.weight) || dimension.weight <= 0) {
       throw new Error(`Rating dimension ${index + 1} weight must be valid.`);
     }
@@ -505,8 +753,136 @@ function normalizeRatingDimensions(
     return {
       id,
       name,
-      score: dimension.score,
       weight: dimension.weight,
+    };
+  });
+}
+
+function normalizeWorkScoresForCategory(
+  dimensions: RatingDimensionScore[],
+  templates: RatingDimensionTemplate[],
+): RatingDimensionScore[] {
+  const templateIds = new Set(templates.map((dimension) => dimension.id));
+  const scoresById = new Map<string, number>();
+
+  dimensions.forEach((dimension, index) => {
+    const id = dimension.id.trim();
+
+    if (!templateIds.has(id)) {
+      throw new Error(
+        `Rating dimension ${index + 1} must belong to the category.`,
+      );
+    }
+
+    if (!Number.isFinite(dimension.score) || dimension.score < 0) {
+      throw new Error(`Rating dimension ${index + 1} score must be valid.`);
+    }
+
+    scoresById.set(id, dimension.score);
+  });
+
+  return templates.map((template) => ({
+    id: template.id,
+    name: template.name,
+    score: scoresById.get(template.id) ?? 0,
+    weight: template.weight,
+  }));
+}
+
+function syncWorkDimensionsWithCategory(
+  dimensions: RatingDimensionScore[],
+  templates: RatingDimensionTemplate[],
+): RatingDimensionScore[] {
+  const scoreById = new Map(
+    dimensions.map((dimension) => [dimension.id, dimension.score] as const),
+  );
+
+  return templates.map((template) => ({
+    id: template.id,
+    name: template.name,
+    score: scoreById.get(template.id) ?? 0,
+    weight: template.weight,
+  }));
+}
+
+function retargetDimensionRankings(
+  library: Library,
+  categoryId: string,
+  templates: RatingDimensionTemplate[],
+  now: string,
+) {
+  const templateIds = new Set(templates.map((dimension) => dimension.id));
+
+  library.rankings = library.rankings.map((ranking) => {
+    if (
+      ranking.categoryId !== categoryId ||
+      ranking.mode !== "dimension" ||
+      !ranking.dimensionId ||
+      templateIds.has(ranking.dimensionId)
+    ) {
+      return ranking;
+    }
+
+    if (templates.length > 0) {
+      return {
+        ...ranking,
+        dimensionId: templates[0].id,
+        updatedAt: now,
+      };
+    }
+
+    return {
+      ...ranking,
+      mode: "finalScore",
+      dimensionId: null,
+      updatedAt: now,
+    };
+  });
+}
+
+function createDefaultTierLevels(): TierLevel[] {
+  return DEFAULT_TIER_LEVEL_DEFINITIONS.map((level) => ({
+    id: level.id,
+    name: level.name,
+    workIds: [],
+  }));
+}
+
+function normalizeTierLevels(
+  library: Library,
+  categoryId: string,
+  levels: TierLevel[],
+): TierLevel[] {
+  const worksInCategory = new Set(
+    library.works
+      .filter((work) => work.categoryId === categoryId)
+      .map((work) => work.id),
+  );
+  const levelById = new Map(levels.map((level) => [level.id, level]));
+  const seenWorkIds = new Set<string>();
+
+  return DEFAULT_TIER_LEVEL_DEFINITIONS.map((definition) => {
+    const level = levelById.get(definition.id);
+    const name = level?.name.trim() || definition.name;
+    const workIds: string[] = [];
+
+    for (const workId of level?.workIds ?? []) {
+      if (!worksInCategory.has(workId)) {
+        throw new Error("Tier list work must belong to the same category.");
+      }
+
+      if (seenWorkIds.has(workId)) {
+        throw new Error("Tier list work ids must be unique.");
+      }
+
+      seenWorkIds.add(workId);
+      workIds.push(workId);
+    }
+
+    return {
+      id: definition.id,
+      name,
+      workIds,
     };
   });
 }

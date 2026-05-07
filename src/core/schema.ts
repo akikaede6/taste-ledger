@@ -1,5 +1,6 @@
 import {
   CURRENT_SCHEMA_VERSION,
+  DEFAULT_TIER_LEVELS,
   type Category,
   type EntityId,
   type ExportSettings,
@@ -10,10 +11,14 @@ import {
   type RankingMode,
   type RatingDimensionScore,
   type RatingDimensionTemplate,
+  type TierLevel,
+  type TierLevelId,
+  type TierList,
   type ValidationIssue,
   type ValidationResult,
   type Work,
 } from "./model";
+import { recalculateWorkScore } from "./scoring";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -22,6 +27,9 @@ const RANKING_MODES = new Set<RankingMode>([
   "dimension",
   "manual",
 ]);
+const TIER_LEVEL_IDS = new Set<TierLevelId>(
+  DEFAULT_TIER_LEVELS.map((level) => level.id),
+);
 
 export function validateLibrary(input: unknown): ValidationResult<Library> {
   const issues: ValidationIssue[] = [];
@@ -41,6 +49,9 @@ export function validateLibrary(input: unknown): ValidationResult<Library> {
   const rankings = readArray(record, "rankings", issues).map((item, index) =>
     readRanking(item, `$.rankings[${index}]`, issues),
   );
+  const tierLists = readOptionalArray(record, "tierLists", issues).map(
+    (item, index) => readTierList(item, `$.tierLists[${index}]`, issues),
+  );
   const exportSettings = readExportSettings(
     record.exportSettings,
     "$.exportSettings",
@@ -52,14 +63,16 @@ export function validateLibrary(input: unknown): ValidationResult<Library> {
     categories.every(isDefined) &&
     works.every(isDefined) &&
     rankings.every(isDefined) &&
+    tierLists.every(isDefined) &&
     exportSettings
-      ? {
+      ? normalizeLibraryRatingDimensions({
           schemaVersion,
           categories,
           works,
           rankings,
+          tierLists,
           exportSettings,
-        }
+        })
       : null;
 
   if (parsed) {
@@ -285,6 +298,68 @@ function readRanking(
   return ranking;
 }
 
+function readTierList(
+  input: unknown,
+  path: string,
+  issues: ValidationIssue[],
+): TierList | null {
+  const record = asRecord(input, path, issues);
+
+  if (!record) {
+    return null;
+  }
+
+  const levels = readArray(record, "levels", issues)
+    .map((item, index) =>
+      readTierLevel(item, `${path}.levels[${index}]`, issues),
+    )
+    .filter(isDefined);
+
+  const tierList: TierList = {
+    id: readRequiredString(record, "id", `${path}.id`, issues),
+    categoryId: readRequiredString(
+      record,
+      "categoryId",
+      `${path}.categoryId`,
+      issues,
+    ),
+    name: readRequiredString(record, "name", `${path}.name`, issues),
+    levels,
+    createdAt: readDateString(record, "createdAt", `${path}.createdAt`, issues),
+    updatedAt: readDateString(record, "updatedAt", `${path}.updatedAt`, issues),
+  };
+
+  if (tierList.name.trim().length === 0) {
+    issues.push({
+      path: `${path}.name`,
+      message: "Tier list name cannot be empty.",
+      severity: "error",
+    });
+  }
+
+  return tierList;
+}
+
+function readTierLevel(
+  input: unknown,
+  path: string,
+  issues: ValidationIssue[],
+): TierLevel | null {
+  const record = asRecord(input, path, issues);
+
+  if (!record) {
+    return null;
+  }
+
+  const id = readTierLevelId(record, `${path}.id`, issues);
+
+  return {
+    id,
+    name: readRequiredString(record, "name", `${path}.name`, issues),
+    workIds: readStringArray(record, "workIds", `${path}.workIds`, issues),
+  };
+}
+
 function readRatingDimensionTemplate(
   input: unknown,
   path: string,
@@ -402,6 +477,11 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
     "$.rankings",
     issues,
   );
+  validateUniqueIds(
+    library.tierLists.map((tierList) => tierList.id),
+    "$.tierLists",
+    issues,
+  );
 
   library.categories.forEach((category, categoryIndex) => {
     validateUniqueIds(
@@ -425,6 +505,27 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
       `$.works[${workIndex}].ratingDimensions`,
       issues,
     );
+
+    const category = library.categories.find(
+      (item) => item.id === work.categoryId,
+    );
+
+    if (category) {
+      const categoryDimensionIds = category.ratingDimensionTemplates.map(
+        (dimension) => dimension.id,
+      );
+      const workDimensionIds = work.ratingDimensions.map(
+        (dimension) => dimension.id,
+      );
+
+      if (!sameStringList(categoryDimensionIds, workDimensionIds)) {
+        issues.push({
+          path: `$.works[${workIndex}].ratingDimensions`,
+          message: "Work rating dimensions must match its category.",
+          severity: "error",
+        });
+      }
+    }
   });
 
   library.rankings.forEach((ranking, rankingIndex) => {
@@ -442,6 +543,25 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
       issues,
     );
 
+    if (ranking.mode === "dimension" && ranking.dimensionId) {
+      const category = library.categories.find(
+        (item) => item.id === ranking.categoryId,
+      );
+
+      if (
+        category &&
+        !category.ratingDimensionTemplates.some(
+          (dimension) => dimension.id === ranking.dimensionId,
+        )
+      ) {
+        issues.push({
+          path: `$.rankings[${rankingIndex}].dimensionId`,
+          message: "Ranking dimension must belong to its category.",
+          severity: "error",
+        });
+      }
+    }
+
     ranking.workIds.forEach((workId, workIndex) => {
       const work = workById.get(workId);
 
@@ -458,6 +578,65 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
           severity: "error",
         });
       }
+    });
+  });
+
+  library.tierLists.forEach((tierList, tierListIndex) => {
+    if (!categoryIds.has(tierList.categoryId)) {
+      issues.push({
+        path: `$.tierLists[${tierListIndex}].categoryId`,
+        message: "Tier list references a missing category.",
+        severity: "error",
+      });
+    }
+
+    const expectedLevelIds = DEFAULT_TIER_LEVELS.map((level) => level.id);
+    const levelIds = tierList.levels.map((level) => level.id);
+
+    if (!sameStringList(levelIds, expectedLevelIds)) {
+      issues.push({
+        path: `$.tierLists[${tierListIndex}].levels`,
+        message: "Tier list must include the five default levels.",
+        severity: "error",
+      });
+    }
+
+    const seenTierWorkIds = new Set<string>();
+
+    tierList.levels.forEach((level, levelIndex) => {
+      validateUniqueIds(
+        level.workIds,
+        `$.tierLists[${tierListIndex}].levels[${levelIndex}].workIds`,
+        issues,
+      );
+
+      level.workIds.forEach((workId, workIndex) => {
+        if (seenTierWorkIds.has(workId)) {
+          issues.push({
+            path: `$.tierLists[${tierListIndex}].levels[${levelIndex}].workIds[${workIndex}]`,
+            message: "Tier list cannot include a work more than once.",
+            severity: "error",
+          });
+        }
+
+        seenTierWorkIds.add(workId);
+
+        const work = workById.get(workId);
+
+        if (!work) {
+          issues.push({
+            path: `$.tierLists[${tierListIndex}].levels[${levelIndex}].workIds[${workIndex}]`,
+            message: "Tier list references a missing work.",
+            severity: "error",
+          });
+        } else if (work.categoryId !== tierList.categoryId) {
+          issues.push({
+            path: `$.tierLists[${tierListIndex}].levels[${levelIndex}].workIds[${workIndex}]`,
+            message: "Tier list cannot include works from another category.",
+            severity: "error",
+          });
+        }
+      });
     });
   });
 }
@@ -518,6 +697,18 @@ function readArray(
   return [];
 }
 
+function readOptionalArray(
+  record: JsonRecord,
+  key: string,
+  issues: ValidationIssue[],
+): unknown[] {
+  if (!(key in record)) {
+    return [];
+  }
+
+  return readArray(record, key, issues);
+}
+
 function readStringArray(
   record: JsonRecord,
   key: string,
@@ -567,6 +758,26 @@ function readRankingMode(
     severity: "error",
   });
   return "finalScore";
+}
+
+function readTierLevelId(
+  record: JsonRecord,
+  path: string,
+  issues: ValidationIssue[],
+): TierLevelId {
+  if (
+    typeof record.id === "string" &&
+    TIER_LEVEL_IDS.has(record.id as TierLevelId)
+  ) {
+    return record.id as TierLevelId;
+  }
+
+  issues.push({
+    path,
+    message: "Expected tier-1, tier-2, tier-3, tier-4, or tier-5.",
+    severity: "error",
+  });
+  return "tier-1";
 }
 
 function readRequiredString(
@@ -740,6 +951,88 @@ function isPortableImagePath(path: string): boolean {
     !path.includes("..") &&
     !path.startsWith("/") &&
     !/^[A-Za-z]:[\\/]/.test(path)
+  );
+}
+
+function normalizeLibraryRatingDimensions(library: Library): Library {
+  const next = structuredClone(library);
+
+  next.categories = next.categories.map((category) => {
+    if (category.ratingDimensionTemplates.length > 0) {
+      return category;
+    }
+
+    const templates: RatingDimensionTemplate[] = [];
+    const seenIds = new Set<string>();
+
+    next.works
+      .filter((work) => work.categoryId === category.id)
+      .forEach((work) => {
+        work.ratingDimensions.forEach((dimension) => {
+          if (!seenIds.has(dimension.id)) {
+            seenIds.add(dimension.id);
+            templates.push({
+              id: dimension.id,
+              name: dimension.name,
+              weight: dimension.weight,
+            });
+          }
+        });
+      });
+
+    return {
+      ...category,
+      ratingDimensionTemplates: templates,
+    };
+  });
+
+  const categoryById = new Map(
+    next.categories.map((category) => [category.id, category] as const),
+  );
+
+  next.works = next.works.map((work) => {
+    const category = categoryById.get(work.categoryId);
+
+    if (!category) {
+      return work;
+    }
+
+    const scoreById = new Map(
+      work.ratingDimensions.map(
+        (dimension) => [dimension.id, dimension.score] as const,
+      ),
+    );
+
+    return recalculateWorkScore({
+      ...work,
+      ratingDimensions: category.ratingDimensionTemplates.map((template) => ({
+        id: template.id,
+        name: template.name,
+        score: scoreById.get(template.id) ?? 0,
+        weight: template.weight,
+      })),
+    });
+  });
+
+  next.tierLists = next.tierLists.map((tierList) => ({
+    ...tierList,
+    levels: DEFAULT_TIER_LEVELS.map((definition) => {
+      const level = tierList.levels.find((item) => item.id === definition.id);
+      return {
+        id: definition.id,
+        name: level?.name || definition.name,
+        workIds: level?.workIds ?? [],
+      };
+    }),
+  }));
+
+  return next;
+}
+
+function sameStringList(left: string[], right: string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
   );
 }
 

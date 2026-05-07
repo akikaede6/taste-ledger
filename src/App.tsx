@@ -6,6 +6,7 @@ import {
   FolderPlus,
   ImagePlus,
   Library,
+  Layers,
   ListPlus,
   Loader2,
   Pencil,
@@ -22,13 +23,20 @@ import {
   useMemo,
   useState,
 } from "react";
-import { sortCategoriesByRecentUpdate } from "./core/library-actions";
-import { sortRankingsByRecentUpdate } from "./core/library-actions";
+import {
+  sortCategoriesByRecentUpdate,
+  sortRankingsByRecentUpdate,
+  sortTierListsByRecentUpdate,
+} from "./core/library-actions";
 import { useLibraryState } from "./core/library-store";
 import type {
+  Category,
   Ranking,
   RankingMode,
   RatingDimensionScore,
+  RatingDimensionTemplate,
+  TierLevelId,
+  TierList,
   Work,
 } from "./core/model";
 import {
@@ -53,6 +61,10 @@ interface RankingSaveInput {
   name: string;
   mode: RankingMode;
   dimensionId: string | null;
+}
+
+interface TierListSaveInput {
+  name: string;
 }
 
 const RANKING_MODE_LABELS: Record<RankingMode, string> = {
@@ -108,6 +120,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   const [newRankingMode, setNewRankingMode] =
     useState<RankingMode>("finalScore");
   const [newRankingDimensionId, setNewRankingDimensionId] = useState("");
+  const [newTierListName, setNewTierListName] = useState("五档分级");
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
@@ -120,11 +133,15 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         (category) => category.id === state.selectedCategoryId,
       )
     : null;
-  const categoryWorks = selectedCategory
-    ? state.library.works.filter(
-        (work) => work.categoryId === selectedCategory.id,
-      )
-    : [];
+  const categoryWorks = useMemo(
+    () =>
+      selectedCategory
+        ? state.library.works.filter(
+            (work) => work.categoryId === selectedCategory.id,
+          )
+        : [],
+    [selectedCategory, state.library.works],
+  );
   const categoryRankings = selectedCategory
     ? sortRankingsByRecentUpdate(
         state.library.rankings.filter(
@@ -132,8 +149,15 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         ),
       )
     : [];
+  const categoryTierLists = selectedCategory
+    ? sortTierListsByRecentUpdate(
+        state.library.tierLists.filter(
+          (tierList) => tierList.categoryId === selectedCategory.id,
+        ),
+      )
+    : [];
   const rankingDimensionOptions = selectedCategory
-    ? collectRankingDimensionOptions(categoryWorks)
+    ? collectRankingDimensionOptions(selectedCategory.ratingDimensionTemplates)
     : [];
   const selectedWork = state.selectedWorkId
     ? state.library.works.find((work) => work.id === state.selectedWorkId)
@@ -143,9 +167,17 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         (ranking) => ranking.id === state.selectedRankingId,
       )
     : null;
+  const selectedTierList = state.selectedTierListId
+    ? state.library.tierLists.find(
+        (tierList) =>
+          tierList.id === state.selectedTierListId &&
+          tierList.categoryId === selectedCategory?.id,
+      )
+    : null;
   const selectedRankingWorks = selectedRanking
     ? getRankingWorks(state.library, selectedRanking)
     : [];
+  const coverImageUrls = useCoverImageUrls(repository, categoryWorks);
 
   async function runAction<T>(action: () => Promise<T>): Promise<T | null> {
     setActionError(null);
@@ -180,13 +212,21 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     await runAction(async () => controller.renameSelectedCategory(name));
   }
 
+  async function handleSaveCategoryDimensions(
+    templates: RatingDimensionTemplate[],
+  ) {
+    await runAction(async () =>
+      controller.updateSelectedCategoryRatingDimensions(templates),
+    );
+  }
+
   async function handleDeleteCategory() {
     if (!selectedCategory) {
       return;
     }
 
     const confirmed = window.confirm(
-      `删除分类「${selectedCategory.name}」？相关作品和排行也会删除。`,
+      `删除分类「${selectedCategory.name}」？相关作品、排行和分级也会删除。`,
     );
 
     if (!confirmed) {
@@ -220,7 +260,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     }
 
     const confirmed = window.confirm(
-      `删除作品「${selectedWork.title}」？相关排行条目也会移除。`,
+      `删除作品「${selectedWork.title}」？相关排行和分级条目也会移除。`,
     );
 
     if (!confirmed) {
@@ -249,6 +289,16 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   async function handleExportRankingShare() {
     const exportPath = await runAction(async () =>
       controller.exportSelectedRankingShare(),
+    );
+
+    if (exportPath) {
+      setActionMessage(`已导出：${exportPath}`);
+    }
+  }
+
+  async function handleExportTierListShare() {
+    const exportPath = await runAction(async () =>
+      controller.exportSelectedTierListShare(),
     );
 
     if (exportPath) {
@@ -325,6 +375,57 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     );
   }
 
+  async function handleCreateTierList(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedCategory) {
+      return;
+    }
+
+    const name = newTierListName.trim();
+
+    if (name.length === 0) {
+      setActionError("分级名称不能为空。");
+      return;
+    }
+
+    await runAction(async () => {
+      await controller.createTierList({
+        categoryId: selectedCategory.id,
+        name,
+      });
+      setNewTierListName("五档分级");
+    });
+  }
+
+  async function handleSaveTierList(input: TierListSaveInput) {
+    await runAction(async () => controller.updateSelectedTierList(input));
+  }
+
+  async function handleDeleteTierList() {
+    if (!selectedTierList) {
+      return;
+    }
+
+    const confirmed = window.confirm(`删除分级「${selectedTierList.name}」？`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    await runAction(async () => controller.deleteSelectedTierList());
+  }
+
+  async function handleMoveTierListWork(workId: string, levelId: TierLevelId) {
+    await runAction(async () =>
+      controller.moveSelectedTierListWork(workId, levelId),
+    );
+  }
+
+  async function handleRemoveTierListWork(workId: string) {
+    await runAction(async () => controller.removeSelectedTierListWork(workId));
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar" aria-label="分类">
@@ -363,6 +464,9 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
             const rankingCount = state.library.rankings.filter(
               (ranking) => ranking.categoryId === category.id,
             ).length;
+            const tierListCount = state.library.tierLists.filter(
+              (tierList) => tierList.categoryId === category.id,
+            ).length;
             const selected = category.id === state.selectedCategoryId;
 
             return (
@@ -376,7 +480,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
               >
                 <span>{category.name}</span>
                 <small>
-                  {workCount} 作品 · {rankingCount} 排行
+                  {workCount} 作品 · {rankingCount} 排行 · {tierListCount} 分级
                 </small>
               </button>
             );
@@ -414,32 +518,39 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                 </div>
 
                 {selectedCategory ? (
-                  <form className="edit-form" onSubmit={handleRenameCategory}>
-                    <label htmlFor="category-name">分类名称</label>
-                    <div className="inline-form-row">
-                      <input
-                        key={selectedCategory.id}
-                        id="category-name"
-                        name="categoryName"
-                        defaultValue={selectedCategory.name}
-                      />
-                      <button
-                        className="icon-button primary"
-                        type="submit"
-                        aria-label="保存分类名称"
-                      >
-                        <Save aria-hidden="true" size={18} />
-                      </button>
-                      <button
-                        className="icon-button danger"
-                        type="button"
-                        aria-label="删除分类"
-                        onClick={() => void handleDeleteCategory()}
-                      >
-                        <Trash2 aria-hidden="true" size={18} />
-                      </button>
-                    </div>
-                  </form>
+                  <>
+                    <form className="edit-form" onSubmit={handleRenameCategory}>
+                      <label htmlFor="category-name">分类名称</label>
+                      <div className="inline-form-row">
+                        <input
+                          key={selectedCategory.id}
+                          id="category-name"
+                          name="categoryName"
+                          defaultValue={selectedCategory.name}
+                        />
+                        <button
+                          className="icon-button primary"
+                          type="submit"
+                          aria-label="保存分类名称"
+                        >
+                          <Save aria-hidden="true" size={18} />
+                        </button>
+                        <button
+                          className="icon-button danger"
+                          type="button"
+                          aria-label="删除分类"
+                          onClick={() => void handleDeleteCategory()}
+                        >
+                          <Trash2 aria-hidden="true" size={18} />
+                        </button>
+                      </div>
+                    </form>
+                    <CategoryDimensionEditor
+                      key={`${selectedCategory.id}-${selectedCategory.updatedAt}`}
+                      category={selectedCategory}
+                      onSave={handleSaveCategoryDimensions}
+                    />
+                  </>
                 ) : (
                   <p className="muted">
                     先创建一个分类，再添加作品、评分和排行。
@@ -629,6 +740,98 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   <p className="muted">先创建一个分类，再创建排行。</p>
                 )}
               </section>
+
+              <section className="panel">
+                <div className="panel-heading">
+                  <Layers aria-hidden="true" size={18} />
+                  <h3>五档分级</h3>
+                </div>
+
+                {selectedCategory ? (
+                  <>
+                    <form
+                      className="create-form tier-create-form"
+                      onSubmit={handleCreateTierList}
+                    >
+                      <label htmlFor="new-tier-list">新分级</label>
+                      <div className="inline-form-row">
+                        <input
+                          id="new-tier-list"
+                          value={newTierListName}
+                          onChange={(event) =>
+                            setNewTierListName(event.target.value)
+                          }
+                          placeholder="五档分级"
+                        />
+                        <button
+                          className="icon-button primary"
+                          type="submit"
+                          aria-label="创建分级"
+                        >
+                          <ListPlus aria-hidden="true" size={18} />
+                        </button>
+                      </div>
+                    </form>
+
+                    <div className="tier-list" aria-label="分级列表">
+                      {categoryTierLists.length > 0 ? (
+                        categoryTierLists.map((tierList) => {
+                          const selected =
+                            tierList.id === state.selectedTierListId;
+                          const assignedCount = countTierListWorks(tierList);
+
+                          return (
+                            <button
+                              key={tierList.id}
+                              className={
+                                selected
+                                  ? "tier-list-button selected"
+                                  : "tier-list-button"
+                              }
+                              type="button"
+                              onClick={() =>
+                                controller.selectTierList(tierList.id)
+                              }
+                            >
+                              <span>{tierList.name}</span>
+                              <small>{assignedCount} 作品</small>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <p className="muted">这个分类还没有五档分级。</p>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <p className="muted">先创建一个分类，再创建分级。</p>
+                )}
+              </section>
+
+              <section className="panel">
+                <div className="panel-heading">
+                  <Layers aria-hidden="true" size={18} />
+                  <h3>分级详情</h3>
+                </div>
+
+                {selectedTierList ? (
+                  <TierListEditor
+                    key={`${selectedTierList.id}-${selectedTierList.updatedAt}`}
+                    tierList={selectedTierList}
+                    works={categoryWorks}
+                    coverImageUrls={coverImageUrls}
+                    onSave={handleSaveTierList}
+                    onDelete={handleDeleteTierList}
+                    onMoveWork={handleMoveTierListWork}
+                    onRemoveWork={handleRemoveTierListWork}
+                    onExport={handleExportTierListShare}
+                  />
+                ) : (
+                  <p className="muted">
+                    创建一个五档分级后，可以把作品放进 S 到 D。
+                  </p>
+                )}
+              </section>
             </div>
 
             <div className="stack">
@@ -650,6 +853,10 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                     <dt>排行</dt>
                     <dd>{state.library.rankings.length}</dd>
                   </div>
+                  <div>
+                    <dt>分级</dt>
+                    <dd>{state.library.tierLists.length}</dd>
+                  </div>
                 </dl>
               </section>
 
@@ -664,6 +871,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                     key={`${selectedWork.id}-${selectedWork.updatedAt}`}
                     work={selectedWork}
                     categoryName={selectedCategory?.name ?? ""}
+                    coverImageUrl={coverImageUrls.get(selectedWork.id) ?? null}
                     onSave={handleSaveWork}
                     onDelete={handleDeleteWork}
                     onCoverUpload={handleStoreWorkCover}
@@ -718,10 +926,168 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
 interface WorkEditorProps {
   work: Work;
   categoryName: string;
+  coverImageUrl: string | null;
   onSave(input: WorkSaveInput): Promise<void>;
   onDelete(): Promise<void>;
   onCoverUpload(fileName: string, bytes: Uint8Array): Promise<void>;
   onExport(variant: WorkShareVariant): Promise<void>;
+}
+
+interface CategoryDimensionEditorProps {
+  category: Category;
+  onSave(templates: RatingDimensionTemplate[]): Promise<void>;
+}
+
+interface RatingTemplateDraft {
+  id: string;
+  name: string;
+  weight: string;
+}
+
+interface RatingTemplateDraftState {
+  errorMessage: string | null;
+  templates: RatingDimensionTemplate[];
+}
+
+function CategoryDimensionEditor({
+  category,
+  onSave,
+}: CategoryDimensionEditorProps) {
+  const [drafts, setDrafts] = useState<RatingTemplateDraft[]>(() =>
+    createTemplateDrafts(category.ratingDimensionTemplates),
+  );
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const templateState = useMemo(() => readTemplateDrafts(drafts), [drafts]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (templateState.errorMessage) {
+      setDraftError(templateState.errorMessage);
+      return;
+    }
+
+    setDraftError(null);
+    await onSave(templateState.templates);
+  }
+
+  function updateTemplateDraft(
+    id: string,
+    field: keyof Omit<RatingTemplateDraft, "id">,
+    value: string,
+  ) {
+    setDraftError(null);
+    setDrafts((current) =>
+      current.map((draft) =>
+        draft.id === id
+          ? {
+              ...draft,
+              [field]: value,
+            }
+          : draft,
+      ),
+    );
+  }
+
+  function addTemplateDraft() {
+    setDraftError(null);
+    setDrafts((current) => [
+      ...current,
+      createNewTemplateDraft(current.length),
+    ]);
+  }
+
+  function removeTemplateDraft(id: string) {
+    setDraftError(null);
+    setDrafts((current) => current.filter((draft) => draft.id !== id));
+  }
+
+  return (
+    <form
+      className="category-dimension-editor"
+      noValidate
+      onSubmit={(event) => void handleSubmit(event)}
+    >
+      <div className="dimension-header">
+        <h4>分类评分维度</h4>
+        <button
+          className="text-button"
+          type="button"
+          onClick={addTemplateDraft}
+        >
+          <ListPlus aria-hidden="true" size={16} />
+          添加评分维度
+        </button>
+      </div>
+
+      {drafts.length > 0 ? (
+        <div className="dimension-list">
+          {drafts.map((draft, index) => {
+            const number = index + 1;
+            const nameId = `${category.id}-${draft.id}-template-name`;
+            const weightId = `${category.id}-${draft.id}-template-weight`;
+
+            return (
+              <div className="dimension-row template-row" key={draft.id}>
+                <div className="dimension-field">
+                  <label htmlFor={nameId}>维度名称 {number}</label>
+                  <input
+                    id={nameId}
+                    value={draft.name}
+                    onChange={(event) =>
+                      updateTemplateDraft(
+                        draft.id,
+                        "name",
+                        event.currentTarget.value,
+                      )
+                    }
+                  />
+                </div>
+                <div className="dimension-field">
+                  <label htmlFor={weightId}>权重 {number}</label>
+                  <input
+                    id={weightId}
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={draft.weight}
+                    onChange={(event) =>
+                      updateTemplateDraft(
+                        draft.id,
+                        "weight",
+                        event.currentTarget.value,
+                      )
+                    }
+                  />
+                </div>
+                <button
+                  className="icon-button danger dimension-remove"
+                  type="button"
+                  aria-label={`删除评分维度 ${number}`}
+                  onClick={() => removeTemplateDraft(draft.id)}
+                >
+                  <Trash2 aria-hidden="true" size={16} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="muted">这个分类还没有评分维度。</p>
+      )}
+
+      {draftError ? (
+        <p className="inline-error" role="alert">
+          {draftError}
+        </p>
+      ) : null}
+
+      <button className="text-button primary" type="submit">
+        <Save aria-hidden="true" size={16} />
+        保存评分维度
+      </button>
+    </form>
+  );
 }
 
 interface RatingDimensionDraft {
@@ -746,6 +1112,7 @@ interface WorkDraft {
 function WorkEditor({
   work,
   categoryName,
+  coverImageUrl,
   onSave,
   onDelete,
   onCoverUpload,
@@ -804,18 +1171,14 @@ function WorkEditor({
     }
   }
 
-  function updateDimensionDraft(
-    id: string,
-    field: keyof Omit<RatingDimensionDraft, "id">,
-    value: string,
-  ) {
+  function updateDimensionDraft(id: string, value: string) {
     setDraftError(null);
     setDimensionDrafts((current) =>
       current.map((draft) =>
         draft.id === id
           ? {
               ...draft,
-              [field]: value,
+              score: value,
             }
           : draft,
       ),
@@ -829,25 +1192,10 @@ function WorkEditor({
     }));
   }
 
-  function addDimensionDraft() {
-    setDraftError(null);
-    setDimensionDrafts((current) => [
-      ...current,
-      createNewDimensionDraft(current.length),
-    ]);
-  }
-
-  function removeDimensionDraft(id: string) {
-    setDraftError(null);
-    setDimensionDrafts((current) =>
-      current.filter((dimension) => dimension.id !== id),
-    );
-  }
-
   const scoreLabel = dimensionState.errorMessage
     ? "评分维度需要修正后才能保存。"
     : dimensionState.finalScore === null
-      ? "还没有评分维度。"
+      ? "当前分类还没有评分维度。"
       : `当前评分 ${dimensionState.finalScore}`;
 
   return (
@@ -868,7 +1216,11 @@ function WorkEditor({
 
       <div className="cover-row">
         <div className="cover-preview">
-          <ImagePlus aria-hidden="true" size={22} />
+          {coverImageUrl ? (
+            <img src={coverImageUrl} alt="" />
+          ) : (
+            <ImagePlus aria-hidden="true" size={22} />
+          )}
           <span>{work.coverImagePath ?? "未设置封面"}</span>
         </div>
         <label className="file-picker">
@@ -884,7 +1236,11 @@ function WorkEditor({
 
       <div className="work-share-preview" aria-label="作品分享预览">
         <div className="work-share-preview-cover">
-          {work.coverImagePath ?? "未设置封面"}
+          {coverImageUrl ? (
+            <img src={coverImageUrl} alt="" />
+          ) : (
+            (work.coverImagePath ?? "未设置封面")
+          )}
         </div>
         <div className="work-share-preview-copy">
           <p className="eyebrow">{categoryName || "未分类"}</p>
@@ -905,39 +1261,22 @@ function WorkEditor({
               {scoreLabel}
             </p>
           </div>
-          <button
-            className="text-button"
-            type="button"
-            onClick={addDimensionDraft}
-          >
-            <ListPlus aria-hidden="true" size={16} />
-            添加评分维度
-          </button>
         </div>
 
         {dimensionDrafts.length > 0 ? (
           <div className="dimension-list">
             {dimensionDrafts.map((dimension, index) => {
               const number = index + 1;
-              const nameId = `${work.id}-${dimension.id}-name`;
               const scoreId = `${work.id}-${dimension.id}-score`;
-              const weightId = `${work.id}-${dimension.id}-weight`;
 
               return (
-                <div className="dimension-row" key={dimension.id}>
-                  <div className="dimension-field">
-                    <label htmlFor={nameId}>维度名称 {number}</label>
-                    <input
-                      id={nameId}
-                      value={dimension.name}
-                      onChange={(event) =>
-                        updateDimensionDraft(
-                          dimension.id,
-                          "name",
-                          event.currentTarget.value,
-                        )
-                      }
-                    />
+                <div
+                  className="dimension-row work-dimension-row"
+                  key={dimension.id}
+                >
+                  <div className="dimension-summary">
+                    <strong>{dimension.name}</strong>
+                    <small>权重 {dimension.weight}</small>
                   </div>
                   <div className="dimension-field">
                     <label htmlFor={scoreId}>评分 {number}</label>
@@ -950,37 +1289,11 @@ function WorkEditor({
                       onChange={(event) =>
                         updateDimensionDraft(
                           dimension.id,
-                          "score",
                           event.currentTarget.value,
                         )
                       }
                     />
                   </div>
-                  <div className="dimension-field">
-                    <label htmlFor={weightId}>权重 {number}</label>
-                    <input
-                      id={weightId}
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={dimension.weight}
-                      onChange={(event) =>
-                        updateDimensionDraft(
-                          dimension.id,
-                          "weight",
-                          event.currentTarget.value,
-                        )
-                      }
-                    />
-                  </div>
-                  <button
-                    className="icon-button danger dimension-remove"
-                    type="button"
-                    aria-label={`删除评分维度 ${number}`}
-                    onClick={() => removeDimensionDraft(dimension.id)}
-                  >
-                    <Trash2 aria-hidden="true" size={16} />
-                  </button>
                 </div>
               );
             })}
@@ -1282,6 +1595,235 @@ function RankingEditor({
   );
 }
 
+interface TierListEditorProps {
+  tierList: TierList;
+  works: Work[];
+  coverImageUrls: Map<string, string>;
+  onSave(input: TierListSaveInput): Promise<void>;
+  onDelete(): Promise<void>;
+  onMoveWork(workId: string, levelId: TierLevelId): Promise<void>;
+  onRemoveWork(workId: string): Promise<void>;
+  onExport(): Promise<void>;
+}
+
+function TierListEditor({
+  tierList,
+  works,
+  coverImageUrls,
+  onSave,
+  onDelete,
+  onMoveWork,
+  onRemoveWork,
+  onExport,
+}: TierListEditorProps) {
+  const [name, setName] = useState(tierList.name);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const workById = useMemo(
+    () => new Map(works.map((work) => [work.id, work] as const)),
+    [works],
+  );
+  const assignedWorkIds = useMemo(
+    () => new Set(tierList.levels.flatMap((level) => level.workIds)),
+    [tierList.levels],
+  );
+  const unassignedWorks = works.filter((work) => !assignedWorkIds.has(work.id));
+  const hasAssignedWorks = tierList.levels.some(
+    (level) => level.workIds.length > 0,
+  );
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (name.trim().length === 0) {
+      setDraftError("分级名称不能为空。");
+      return;
+    }
+
+    setDraftError(null);
+    await onSave({ name });
+  }
+
+  async function handleExport() {
+    if (!hasAssignedWorks) {
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      await onExport();
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  return (
+    <div className="tier-editor">
+      <form
+        className="tier-editor-form"
+        noValidate
+        onSubmit={(event) => void handleSubmit(event)}
+      >
+        <label htmlFor={`tier-list-name-${tierList.id}`}>分级名称</label>
+        <input
+          id={`tier-list-name-${tierList.id}`}
+          value={name}
+          onChange={(event) => setName(event.currentTarget.value)}
+        />
+
+        <div className="button-row">
+          <button className="text-button primary" type="submit">
+            <Save aria-hidden="true" size={16} />
+            保存分级
+          </button>
+          <button
+            className="text-button danger"
+            type="button"
+            onClick={() => void onDelete()}
+          >
+            <Trash2 aria-hidden="true" size={16} />
+            删除分级
+          </button>
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => void handleExport()}
+            disabled={isExporting || !hasAssignedWorks}
+          >
+            <ImagePlus aria-hidden="true" size={16} />
+            {isExporting ? "导出中" : "导出分级图"}
+          </button>
+        </div>
+
+        {!hasAssignedWorks ? (
+          <p className="inline-hint">至少放入一个作品后再导出分级图。</p>
+        ) : null}
+
+        {draftError ? (
+          <p className="inline-error" role="alert">
+            {draftError}
+          </p>
+        ) : null}
+      </form>
+
+      <div className="tier-unassigned">
+        <div className="tier-section-heading">
+          <h4>未分级作品</h4>
+          <small>{unassignedWorks.length}</small>
+        </div>
+        {works.length === 0 ? (
+          <p className="muted">这个分类还没有作品。</p>
+        ) : unassignedWorks.length > 0 ? (
+          <div className="tier-card-grid" aria-label="未分级作品">
+            {unassignedWorks.map((work) => (
+              <TierWorkCard
+                key={work.id}
+                work={work}
+                coverImageUrl={coverImageUrls.get(work.id) ?? null}
+                levels={tierList.levels}
+                currentLevelId={null}
+                onMoveWork={onMoveWork}
+                onRemoveWork={onRemoveWork}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="muted">所有作品都已经放入分级。</p>
+        )}
+      </div>
+
+      <div className="tier-board" aria-label="五档分级">
+        {tierList.levels.map((level) => {
+          const levelWorks = level.workIds.flatMap((workId) => {
+            const work = workById.get(workId);
+            return work ? [work] : [];
+          });
+
+          return (
+            <section className="tier-row" key={level.id}>
+              <div className={`tier-level-label ${level.id}`}>
+                <strong>{level.name}</strong>
+                <small>{levelWorks.length}</small>
+              </div>
+              {levelWorks.length > 0 ? (
+                <div className="tier-card-grid">
+                  {levelWorks.map((work) => (
+                    <TierWorkCard
+                      key={work.id}
+                      work={work}
+                      coverImageUrl={coverImageUrls.get(work.id) ?? null}
+                      levels={tierList.levels}
+                      currentLevelId={level.id}
+                      onMoveWork={onMoveWork}
+                      onRemoveWork={onRemoveWork}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">暂无作品</p>
+              )}
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+interface TierWorkCardProps {
+  work: Work;
+  coverImageUrl: string | null;
+  levels: TierList["levels"];
+  currentLevelId: TierLevelId | null;
+  onMoveWork(workId: string, levelId: TierLevelId): Promise<void>;
+  onRemoveWork(workId: string): Promise<void>;
+}
+
+function TierWorkCard({
+  work,
+  coverImageUrl,
+  levels,
+  currentLevelId,
+  onMoveWork,
+  onRemoveWork,
+}: TierWorkCardProps) {
+  return (
+    <article className="tier-work-card">
+      <div className="tier-work-cover">
+        {coverImageUrl ? (
+          <img src={coverImageUrl} alt="" />
+        ) : (
+          <span>{work.coverImagePath ?? "未设置封面"}</span>
+        )}
+      </div>
+      <div className="tier-work-copy">
+        <strong>{work.title}</strong>
+        <select
+          aria-label={`移动 ${work.title}`}
+          value={currentLevelId ?? ""}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+
+            if (value === "") {
+              void onRemoveWork(work.id);
+              return;
+            }
+
+            void onMoveWork(work.id, value as TierLevelId);
+          }}
+        >
+          <option value="">未分级</option>
+          {levels.map((level) => (
+            <option key={level.id} value={level.id}>
+              {level.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    </article>
+  );
+}
+
 function createDimensionDrafts(
   ratingDimensions: RatingDimensionScore[],
 ): RatingDimensionDraft[] {
@@ -1293,11 +1835,20 @@ function createDimensionDrafts(
   }));
 }
 
-function createNewDimensionDraft(index: number): RatingDimensionDraft {
+function createTemplateDrafts(
+  templates: RatingDimensionTemplate[],
+): RatingTemplateDraft[] {
+  return templates.map((template) => ({
+    id: template.id,
+    name: template.name,
+    weight: String(template.weight),
+  }));
+}
+
+function createNewTemplateDraft(index: number): RatingTemplateDraft {
   return {
-    id: `dimension-${crypto.randomUUID()}`,
+    id: `template-${crypto.randomUUID()}`,
     name: `维度 ${index + 1}`,
-    score: "0",
     weight: "1",
   };
 }
@@ -1360,6 +1911,58 @@ function readDimensionDrafts(
   };
 }
 
+function readTemplateDrafts(
+  drafts: RatingTemplateDraft[],
+): RatingTemplateDraftState {
+  const seenIds = new Set<string>();
+  const templates: RatingDimensionTemplate[] = [];
+
+  for (const [index, draft] of drafts.entries()) {
+    const number = index + 1;
+    const id = draft.id.trim();
+    const name = draft.name.trim();
+    const weightText = draft.weight.trim();
+
+    if (id.length === 0 || seenIds.has(id)) {
+      return failTemplateDraft(`评分维度 ${number} 无法保存。`);
+    }
+
+    seenIds.add(id);
+
+    if (name.length === 0) {
+      return failTemplateDraft(`评分维度 ${number} 名称不能为空。`);
+    }
+
+    if (weightText.length === 0) {
+      return failTemplateDraft(`评分维度 ${number} 权重不能为空。`);
+    }
+
+    const weight = Number(weightText);
+
+    if (!Number.isFinite(weight) || weight <= 0) {
+      return failTemplateDraft(`评分维度 ${number} 权重必须大于 0。`);
+    }
+
+    templates.push({
+      id,
+      name,
+      weight,
+    });
+  }
+
+  return {
+    errorMessage: null,
+    templates,
+  };
+}
+
+function failTemplateDraft(message: string): RatingTemplateDraftState {
+  return {
+    errorMessage: message,
+    templates: [],
+  };
+}
+
 function failDimensionDraft(message: string): RatingDimensionDraftState {
   return {
     errorMessage: message,
@@ -1413,6 +2016,100 @@ function formatRankingWorkScore(work: Work, ranking: Ranking): string {
   }
 
   return work.finalScore === null ? "未评分" : `${work.finalScore} 分`;
+}
+
+function countTierListWorks(tierList: TierList): number {
+  return tierList.levels.reduce(
+    (count, level) => count + level.workIds.length,
+    0,
+  );
+}
+
+function useCoverImageUrls(
+  repository: LibraryRepository,
+  works: Work[],
+): Map<string, string> {
+  const [urls, setUrls] = useState<Map<string, string>>(() => new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    const worksWithCovers = works.filter((work) => work.coverImagePath);
+
+    if (worksWithCovers.length === 0) {
+      void Promise.resolve().then(() => {
+        if (!cancelled) {
+          setUrls(new Map());
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void Promise.all(
+      worksWithCovers.map(async (work) => {
+        if (!work.coverImagePath) {
+          return null;
+        }
+
+        const bytes = await repository.readImage(work.coverImagePath);
+
+        if (!bytes) {
+          return null;
+        }
+
+        return [
+          work.id,
+          `data:${getImageMimeType(work.coverImagePath)};base64,${bytesToBase64(
+            bytes,
+          )}`,
+        ] as const;
+      }),
+    ).then((entries) => {
+      if (!cancelled) {
+        setUrls(new Map(entries.filter((entry) => entry !== null)));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [repository, works]);
+
+  return urls;
+}
+
+function getImageMimeType(path: string): string {
+  const extension = path.split(".").pop()?.toLowerCase();
+
+  if (extension === "jpg" || extension === "jpeg") {
+    return "image/jpeg";
+  }
+
+  if (extension === "webp") {
+    return "image/webp";
+  }
+
+  if (extension === "svg") {
+    return "image/svg+xml";
+  }
+
+  return "image/png";
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+
+  if (typeof globalThis.btoa === "function") {
+    return globalThis.btoa(binary);
+  }
+
+  return Buffer.from(bytes).toString("base64");
 }
 
 function LoadingShell({ label }: { label: string }) {

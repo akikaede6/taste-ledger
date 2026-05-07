@@ -2,11 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCategory,
   createRanking,
+  createTierList,
   createWork,
   deleteCategory,
+  deleteTierList,
   deleteWork,
   moveRankingWork,
+  moveTierListWork,
+  removeTierListWork,
   renameCategory,
+  updateCategoryRatingDimensions,
   updateWork,
 } from "../src/core/library-actions";
 import {
@@ -33,6 +38,11 @@ function libraryWithCategory(): Library {
             id: "story",
             name: "剧情",
             weight: 2,
+          },
+          {
+            id: "music",
+            name: "音乐",
+            weight: 1,
           },
         ],
       },
@@ -85,6 +95,7 @@ function libraryWithCategory(): Library {
         updatedAt: now,
       },
     ],
+    tierLists: [],
     exportSettings: {
       workCoverTemplate: "default",
       workLongTemplate: "default",
@@ -171,6 +182,7 @@ function rankingLibrary(): Library {
       },
     ],
     rankings: [],
+    tierLists: [],
     exportSettings: {
       workCoverTemplate: "default",
       workLongTemplate: "default",
@@ -255,6 +267,12 @@ describe("category actions", () => {
         score: 0,
         weight: 2,
       },
+      {
+        id: "music",
+        name: "音乐",
+        score: 0,
+        weight: 1,
+      },
     ]);
   });
 
@@ -301,18 +319,60 @@ describe("category actions", () => {
     });
   });
 
+  it("updates category rating dimensions and syncs category works", () => {
+    vi.setSystemTime(new Date("2026-05-05T02:26:00.000Z"));
+
+    const next = updateCategoryRatingDimensions(rankingLibrary(), "cat-film", [
+      {
+        id: "story",
+        name: "故事",
+        weight: 2,
+      },
+      {
+        id: "music",
+        name: "音乐",
+        weight: 1,
+      },
+    ]);
+
+    expect(next.categories[0].ratingDimensionTemplates).toEqual([
+      {
+        id: "story",
+        name: "故事",
+        weight: 2,
+      },
+      {
+        id: "music",
+        name: "音乐",
+        weight: 1,
+      },
+    ]);
+    expect(next.works[0].ratingDimensions).toEqual([
+      {
+        id: "story",
+        name: "故事",
+        score: 7,
+        weight: 2,
+      },
+      {
+        id: "music",
+        name: "音乐",
+        score: 0,
+        weight: 1,
+      },
+    ]);
+    expect(next.works[0].finalScore).toBe(4.67);
+  });
+
   it("rejects invalid rating dimensions", () => {
     expect(() =>
-      updateWork(libraryWithCategory(), "work-a", {
-        ratingDimensions: [
-          {
-            id: "story",
-            name: "剧情",
-            score: 9,
-            weight: -1,
-          },
-        ],
-      }),
+      updateCategoryRatingDimensions(libraryWithCategory(), "cat-film", [
+        {
+          id: "story",
+          name: "剧情",
+          weight: -1,
+        },
+      ]),
     ).toThrow("Rating dimension 1 weight must be valid.");
 
     expect(() =>
@@ -327,6 +387,19 @@ describe("category actions", () => {
         ],
       }),
     ).toThrow("Rating dimension 1 score must be valid.");
+
+    expect(() =>
+      updateWork(libraryWithCategory(), "work-a", {
+        ratingDimensions: [
+          {
+            id: "acting",
+            name: "演出",
+            score: 9,
+            weight: 1,
+          },
+        ],
+      }),
+    ).toThrow("Rating dimension 1 must belong to the category.");
   });
 
   it("creates a ranking sorted by final score", () => {
@@ -423,6 +496,43 @@ describe("category actions", () => {
 
     expect(next.rankings[0].workIds).toEqual(["work-b", "work-a", "work-c"]);
     expect(next.rankings[0].updatedAt).toBe(rankingNow);
+  });
+
+  it("creates and edits a five-level tier list", () => {
+    vi.setSystemTime(new Date(rankingNow));
+
+    const created = createTierList(rankingLibrary(), {
+      categoryId: "cat-film",
+      name: "五档分级",
+    });
+
+    expect(created.tierList).toMatchObject({
+      name: "五档分级",
+      categoryId: "cat-film",
+      createdAt: rankingNow,
+      updatedAt: rankingNow,
+    });
+    expect(created.tierList.levels.map((level) => level.name)).toEqual([
+      "S",
+      "A",
+      "B",
+      "C",
+      "D",
+    ]);
+
+    const moved = moveTierListWork(
+      created.library,
+      created.tierList.id,
+      "work-b",
+      "tier-1",
+    );
+    expect(moved.tierLists[0].levels[0].workIds).toEqual(["work-b"]);
+
+    const removed = removeTierListWork(moved, created.tierList.id, "work-b");
+    expect(removed.tierLists[0].levels[0].workIds).toEqual([]);
+
+    const deleted = deleteTierList(removed, created.tierList.id);
+    expect(deleted.tierLists).toEqual([]);
   });
 
   it("deletes a work and removes ranking references", () => {

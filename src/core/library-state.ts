@@ -1,24 +1,40 @@
-import { createEmptyLibrary, type Library } from "./model";
+import {
+  createEmptyLibrary,
+  type Library,
+  type RatingDimensionTemplate,
+  type TierLevelId,
+  type TierList,
+} from "./model";
 import {
   createCategory,
   createRanking,
+  createTierList,
   createWork,
   deleteCategory,
   deleteRanking,
+  deleteTierList,
   deleteWork,
   moveRankingWork,
+  moveTierListWork,
   renameCategory,
+  removeTierListWork,
   sortCategoriesByRecentUpdate,
   sortRankingsByRecentUpdate,
+  sortTierListsByRecentUpdate,
+  type TierListInput,
+  type TierListUpdateInput,
   type RankingInput,
   type RankingUpdateInput,
   type WorkUpdateInput,
+  updateCategoryRatingDimensions,
   updateWork,
   updateRanking,
+  updateTierList,
 } from "./library-actions";
 import { getRankingWorks } from "./ranking";
 import {
   createRankingShareImage,
+  createTierListShareImage,
   createWorkShareImage,
   type WorkShareVariant,
 } from "./share-export";
@@ -30,6 +46,7 @@ export interface LibraryState {
   selectedCategoryId: string | null;
   selectedWorkId: string | null;
   selectedRankingId: string | null;
+  selectedTierListId: string | null;
   errorMessage: string | null;
 }
 
@@ -39,8 +56,12 @@ export interface LibraryController {
   selectCategory(categoryId: string | null): void;
   selectWork(workId: string | null): void;
   selectRanking(rankingId: string | null): void;
+  selectTierList(tierListId: string | null): void;
   createCategory(name: string): Promise<void>;
   renameSelectedCategory(name: string): Promise<void>;
+  updateSelectedCategoryRatingDimensions(
+    templates: RatingDimensionTemplate[],
+  ): Promise<void>;
   deleteSelectedCategory(): Promise<void>;
   createWork(title: string): Promise<void>;
   updateSelectedWork(input: WorkUpdateInput): Promise<void>;
@@ -48,10 +69,16 @@ export interface LibraryController {
   storeSelectedWorkCover(fileName: string, bytes: Uint8Array): Promise<void>;
   exportSelectedWorkShare(variant: WorkShareVariant): Promise<string>;
   exportSelectedRankingShare(): Promise<string>;
+  exportSelectedTierListShare(): Promise<string>;
   createRanking(input: RankingInput): Promise<void>;
   updateSelectedRanking(input: RankingUpdateInput): Promise<void>;
   deleteSelectedRanking(): Promise<void>;
   moveSelectedRankingWork(workId: string, direction: -1 | 1): Promise<void>;
+  createTierList(input: TierListInput): Promise<void>;
+  updateSelectedTierList(input: TierListUpdateInput): Promise<void>;
+  deleteSelectedTierList(): Promise<void>;
+  moveSelectedTierListWork(workId: string, levelId: TierLevelId): Promise<void>;
+  removeSelectedTierListWork(workId: string): Promise<void>;
   refresh(): Promise<void>;
   subscribe(listener: () => void): () => void;
 }
@@ -65,6 +92,7 @@ export function createLibraryController(
     selectedCategoryId: null,
     selectedWorkId: null,
     selectedRankingId: null,
+    selectedTierListId: null,
     errorMessage: null,
   };
 
@@ -83,7 +111,10 @@ export function createLibraryController(
     library: Library,
   ): Pick<
     LibraryState,
-    "selectedCategoryId" | "selectedWorkId" | "selectedRankingId"
+    | "selectedCategoryId"
+    | "selectedWorkId"
+    | "selectedRankingId"
+    | "selectedTierListId"
   > {
     const categoryId =
       state.selectedCategoryId &&
@@ -121,10 +152,27 @@ export function createLibraryController(
             )[0]?.id ?? null)
           : null;
 
+    const tierListId =
+      state.selectedTierListId &&
+      library.tierLists.some(
+        (tierList) =>
+          tierList.id === state.selectedTierListId &&
+          tierList.categoryId === categoryId,
+      )
+        ? state.selectedTierListId
+        : categoryId
+          ? (sortTierListsByRecentUpdate(
+              library.tierLists.filter(
+                (tierList) => tierList.categoryId === categoryId,
+              ),
+            )[0]?.id ?? null)
+          : null;
+
     return {
       selectedCategoryId: categoryId,
       selectedWorkId: workId,
       selectedRankingId: rankingId,
+      selectedTierListId: tierListId,
     };
   }
 
@@ -132,7 +180,10 @@ export function createLibraryController(
     library: Library,
     selectionOverride?: Pick<
       LibraryState,
-      "selectedCategoryId" | "selectedWorkId" | "selectedRankingId"
+      | "selectedCategoryId"
+      | "selectedWorkId"
+      | "selectedRankingId"
+      | "selectedTierListId"
     >,
   ) {
     try {
@@ -146,6 +197,7 @@ export function createLibraryController(
         selectedCategoryId: selection.selectedCategoryId,
         selectedWorkId: selection.selectedWorkId,
         selectedRankingId: selection.selectedRankingId,
+        selectedTierListId: selection.selectedTierListId,
       });
     } catch (error) {
       setState({
@@ -174,6 +226,7 @@ export function createLibraryController(
         selectedCategoryId: selection.selectedCategoryId,
         selectedWorkId: selection.selectedWorkId,
         selectedRankingId: selection.selectedRankingId,
+        selectedTierListId: selection.selectedTierListId,
         errorMessage: null,
       });
     } catch (error) {
@@ -183,6 +236,7 @@ export function createLibraryController(
         selectedCategoryId: null,
         selectedWorkId: null,
         selectedRankingId: null,
+        selectedTierListId: null,
         errorMessage:
           error instanceof Error ? error.message : "Failed to load library.",
       });
@@ -212,11 +266,20 @@ export function createLibraryController(
                 (ranking) => ranking.categoryId === categoryId,
               ),
             )[0]?.id ?? null);
+      const selectedTierListId =
+        categoryId === null
+          ? null
+          : (sortTierListsByRecentUpdate(
+              state.library.tierLists.filter(
+                (tierList) => tierList.categoryId === categoryId,
+              ),
+            )[0]?.id ?? null);
       setState({
         ...state,
         selectedCategoryId: categoryId,
         selectedWorkId,
         selectedRankingId,
+        selectedTierListId,
       });
     },
 
@@ -261,6 +324,44 @@ export function createLibraryController(
         selectedCategoryId: ranking.categoryId,
         selectedWorkId,
         selectedRankingId: rankingId,
+        selectedTierListId:
+          state.library.tierLists.find(
+            (tierList) => tierList.categoryId === ranking.categoryId,
+          )?.id ?? null,
+      });
+    },
+
+    selectTierList(tierListId) {
+      if (tierListId === null) {
+        setState({
+          ...state,
+          selectedTierListId: null,
+        });
+        return;
+      }
+
+      const tierList = state.library.tierLists.find(
+        (item) => item.id === tierListId,
+      );
+
+      if (!tierList) {
+        return;
+      }
+
+      setState({
+        ...state,
+        selectedCategoryId: tierList.categoryId,
+        selectedWorkId:
+          state.library.works.find(
+            (work) => work.categoryId === tierList.categoryId,
+          )?.id ?? null,
+        selectedRankingId:
+          sortRankingsByRecentUpdate(
+            state.library.rankings.filter(
+              (ranking) => ranking.categoryId === tierList.categoryId,
+            ),
+          )[0]?.id ?? null,
+        selectedTierListId: tierListId,
       });
     },
 
@@ -277,6 +378,21 @@ export function createLibraryController(
       }
 
       const nextLibrary = renameCategory(state.library, categoryId, name);
+      await saveLibrary(nextLibrary);
+    },
+
+    async updateSelectedCategoryRatingDimensions(templates) {
+      const categoryId = state.selectedCategoryId;
+
+      if (!categoryId) {
+        return;
+      }
+
+      const nextLibrary = updateCategoryRatingDimensions(
+        state.library,
+        categoryId,
+        templates,
+      );
       await saveLibrary(nextLibrary);
     },
 
@@ -306,6 +422,7 @@ export function createLibraryController(
         selectedCategoryId: categoryId,
         selectedWorkId: result.work.id,
         selectedRankingId: state.selectedRankingId,
+        selectedTierListId: state.selectedTierListId,
       });
     },
 
@@ -393,6 +510,40 @@ export function createLibraryController(
       });
     },
 
+    async exportSelectedTierListShare() {
+      const tierListId = state.selectedTierListId;
+
+      if (!tierListId) {
+        throw new Error("Tier list not selected.");
+      }
+
+      const tierList = state.library.tierLists.find(
+        (item) => item.id === tierListId,
+      );
+
+      if (!tierList) {
+        throw new Error("Tier list not found.");
+      }
+
+      const coverImages = await buildCoverImageMap(
+        repository,
+        state.library,
+        tierList,
+      );
+      const image = createTierListShareImage(
+        state.library,
+        tierList.id,
+        coverImages,
+      );
+
+      return repository.storeExport({
+        kind: "tiers",
+        id: image.id,
+        extension: image.extension,
+        bytes: image.bytes,
+      });
+    },
+
     async createRanking(input) {
       const categoryId = state.selectedCategoryId;
 
@@ -411,6 +562,10 @@ export function createLibraryController(
           state.library.works.find((work) => work.categoryId === categoryId)
             ?.id ?? null,
         selectedRankingId: result.ranking.id,
+        selectedTierListId:
+          state.library.tierLists.find(
+            (tierList) => tierList.categoryId === categoryId,
+          )?.id ?? null,
       });
     },
 
@@ -452,6 +607,80 @@ export function createLibraryController(
       await saveLibrary(nextLibrary);
     },
 
+    async createTierList(input) {
+      const categoryId = state.selectedCategoryId;
+
+      if (!categoryId) {
+        throw new Error("Category not selected.");
+      }
+
+      const result = createTierList(state.library, {
+        ...input,
+        categoryId,
+      });
+
+      await saveLibrary(result.library, {
+        selectedCategoryId: categoryId,
+        selectedWorkId:
+          state.library.works.find((work) => work.categoryId === categoryId)
+            ?.id ?? null,
+        selectedRankingId:
+          state.library.rankings.find(
+            (ranking) => ranking.categoryId === categoryId,
+          )?.id ?? null,
+        selectedTierListId: result.tierList.id,
+      });
+    },
+
+    async updateSelectedTierList(input) {
+      const tierListId = state.selectedTierListId;
+
+      if (!tierListId) {
+        return;
+      }
+
+      const nextLibrary = updateTierList(state.library, tierListId, input);
+      await saveLibrary(nextLibrary);
+    },
+
+    async deleteSelectedTierList() {
+      const tierListId = state.selectedTierListId;
+
+      if (!tierListId) {
+        return;
+      }
+
+      const nextLibrary = deleteTierList(state.library, tierListId);
+      await saveLibrary(nextLibrary);
+    },
+
+    async moveSelectedTierListWork(workId, levelId) {
+      const tierListId = state.selectedTierListId;
+
+      if (!tierListId) {
+        return;
+      }
+
+      const nextLibrary = moveTierListWork(
+        state.library,
+        tierListId,
+        workId,
+        levelId,
+      );
+      await saveLibrary(nextLibrary);
+    },
+
+    async removeSelectedTierListWork(workId) {
+      const tierListId = state.selectedTierListId;
+
+      if (!tierListId) {
+        return;
+      }
+
+      const nextLibrary = removeTierListWork(state.library, tierListId, workId);
+      await saveLibrary(nextLibrary);
+    },
+
     refresh() {
       return loadLibrary();
     },
@@ -469,4 +698,68 @@ function createCategoryAction(library: Library, name: string): Library {
   const next = createCategory(library, { name });
   next.categories = sortCategoriesByRecentUpdate(next.categories);
   return next;
+}
+
+async function buildCoverImageMap(
+  repository: LibraryRepository,
+  library: Library,
+  tierList: TierList,
+): Promise<Map<string, string>> {
+  const assignedWorkIds = new Set(
+    tierList.levels.flatMap((level) => level.workIds),
+  );
+  const works = library.works.filter(
+    (work) => assignedWorkIds.has(work.id) && work.coverImagePath,
+  );
+  const entries = await Promise.all(
+    works.map(async (work) => {
+      if (!work.coverImagePath) {
+        return null;
+      }
+
+      const bytes = await repository.readImage(work.coverImagePath);
+
+      if (!bytes) {
+        return null;
+      }
+
+      return [
+        work.id,
+        `data:${getImageMimeType(work.coverImagePath)};base64,${bytesToBase64(
+          bytes,
+        )}`,
+      ] as const;
+    }),
+  );
+
+  return new Map(entries.filter((entry) => entry !== null));
+}
+
+function getImageMimeType(path: string): string {
+  const extension = path.split(".").pop()?.toLowerCase();
+
+  if (extension === "jpg" || extension === "jpeg") {
+    return "image/jpeg";
+  }
+
+  if (extension === "webp") {
+    return "image/webp";
+  }
+
+  if (extension === "svg") {
+    return "image/svg+xml";
+  }
+
+  return "image/png";
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+
+  return globalThis.btoa(binary);
 }

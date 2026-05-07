@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildTierListSharePayload,
   buildWorkSharePayload,
   buildRankingSharePayload,
+  createTierListShareImage,
   createWorkShareImage,
   renderRankingShareSvg,
+  renderTierListShareSvg,
   renderWorkShareSvg,
 } from "../src/core/share-export";
 import { CURRENT_SCHEMA_VERSION, type Library } from "../src/core/model";
@@ -81,6 +84,7 @@ function shareLibrary(): Library {
         updatedAt: now,
       },
     ],
+    tierLists: [],
     exportSettings: {
       workCoverTemplate: "default",
       workLongTemplate: "default",
@@ -187,5 +191,72 @@ describe("work share export", () => {
     expect(() => buildRankingSharePayload(library, "ranking-film", [])).toThrow(
       "Ranking has no works.",
     );
+  });
+
+  it("renders a tier list export with embedded cover data", () => {
+    const library: Library = {
+      ...shareLibrary(),
+      works: shareLibrary().works.map((work) =>
+        work.id === "work-a"
+          ? {
+              ...work,
+              coverImagePath: "images/work-a.png",
+            }
+          : work,
+      ),
+      tierLists: [
+        {
+          id: "tier-film",
+          categoryId: "cat-film",
+          name: "五档分级",
+          levels: [
+            {
+              id: "tier-1",
+              name: "S",
+              workIds: ["work-a"],
+            },
+            {
+              id: "tier-2",
+              name: "A",
+              workIds: [],
+            },
+            {
+              id: "tier-3",
+              name: "B",
+              workIds: [],
+            },
+            {
+              id: "tier-4",
+              name: "C",
+              workIds: [],
+            },
+            {
+              id: "tier-5",
+              name: "D",
+              workIds: [],
+            },
+          ],
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    };
+    const coverImages = new Map([["work-a", "data:image/png;base64,AAAA"]]);
+    const payload = buildTierListSharePayload(
+      library,
+      "tier-film",
+      coverImages,
+    );
+    const svg = renderTierListShareSvg(payload);
+    const image = createTierListShareImage(library, "tier-film", coverImages);
+
+    expect(payload.tierListName).toBe("五档分级");
+    expect(payload.levels[0].items[0]).toMatchObject({
+      title: "作品 A",
+      coverDataUrl: "data:image/png;base64,AAAA",
+    });
+    expect(svg).toContain("<image");
+    expect(svg).toContain("作品 A");
+    expect(image.id).toMatch(/^tier-film-tier-\d+$/);
   });
 });

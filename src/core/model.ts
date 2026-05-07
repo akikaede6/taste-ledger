@@ -52,6 +52,34 @@ export interface Ranking {
   updatedAt: IsoDateString;
 }
 
+export type TierLevelId = "tier-1" | "tier-2" | "tier-3" | "tier-4" | "tier-5";
+
+export const DEFAULT_TIER_LEVELS: ReadonlyArray<{
+  id: TierLevelId;
+  name: string;
+}> = [
+  { id: "tier-1", name: "S" },
+  { id: "tier-2", name: "A" },
+  { id: "tier-3", name: "B" },
+  { id: "tier-4", name: "C" },
+  { id: "tier-5", name: "D" },
+];
+
+export interface TierLevel {
+  id: TierLevelId;
+  name: string;
+  workIds: EntityId[];
+}
+
+export interface TierList {
+  id: EntityId;
+  categoryId: EntityId;
+  name: string;
+  levels: TierLevel[];
+  createdAt: IsoDateString;
+  updatedAt: IsoDateString;
+}
+
 export interface ExportSettings {
   workCoverTemplate: "default";
   workLongTemplate: "default";
@@ -63,6 +91,7 @@ export interface Library {
   categories: Category[];
   works: Work[];
   rankings: Ranking[];
+  tierLists: TierList[];
   exportSettings: ExportSettings;
 }
 
@@ -96,6 +125,7 @@ export function createEmptyLibrary(): Library {
     categories: [],
     works: [],
     rankings: [],
+    tierLists: [],
     exportSettings: {
       workCoverTemplate: "default",
       workLongTemplate: "default",

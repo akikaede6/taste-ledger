@@ -1,4 +1,4 @@
-import type { Library, Ranking, Work } from "./model";
+import type { Library, Ranking, RatingDimensionTemplate, Work } from "./model";
 
 export interface RankingDimensionOption {
   id: string;
@@ -6,19 +6,12 @@ export interface RankingDimensionOption {
 }
 
 export function collectRankingDimensionOptions(
-  works: Work[],
+  templates: RatingDimensionTemplate[],
 ): RankingDimensionOption[] {
-  const dimensions = new Map<string, string>();
-
-  for (const work of works) {
-    for (const dimension of work.ratingDimensions) {
-      if (!dimensions.has(dimension.id)) {
-        dimensions.set(dimension.id, dimension.name);
-      }
-    }
-  }
-
-  return [...dimensions.entries()].map(([id, name]) => ({ id, name }));
+  return templates.map((dimension) => ({
+    id: dimension.id,
+    name: dimension.name,
+  }));
 }
 
 export function sortWorksForRanking(

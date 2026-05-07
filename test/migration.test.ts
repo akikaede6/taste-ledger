@@ -6,6 +6,7 @@ import {
   createCategory,
   createRanking,
   createWork,
+  updateCategoryRatingDimensions,
   updateWork,
 } from "../src/core/library-actions";
 import { createEmptyLibrary } from "../src/core/model";
@@ -29,6 +30,18 @@ describe("data directory migration", () => {
       title: "作品 A",
     });
     library = created.library;
+
+    library = updateCategoryRatingDimensions(
+      library,
+      library.categories[0].id,
+      [
+        {
+          id: "story",
+          name: "剧情",
+          weight: 1,
+        },
+      ],
+    );
 
     const coverPath = await sourceRepository.storeImage({
       id: created.work.id,

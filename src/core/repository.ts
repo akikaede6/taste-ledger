@@ -28,7 +28,7 @@ export interface StoredImage {
 }
 
 export interface StoredExport {
-  kind: "works" | "rankings";
+  kind: "works" | "rankings" | "tiers";
   id: string;
   extension: string;
   bytes: Uint8Array;
@@ -38,6 +38,7 @@ export interface LibraryRepository {
   load(): Promise<LoadLibraryResult>;
   save(library: Library): Promise<void>;
   ensureStructure(): Promise<void>;
+  readImage(relativePath: string): Promise<Uint8Array | null>;
   storeImage(image: StoredImage): Promise<string>;
   storeExport(exportFile: StoredExport): Promise<string>;
   removeImage(relativePath: string): Promise<void>;
@@ -105,6 +106,14 @@ export function createLibraryRepository(
     async ensureStructure() {
       await backend.ensureDirectory(imagesDir);
       await backend.ensureDirectory(exportsDir);
+    },
+
+    async readImage(relativePath: string) {
+      if (!relativePath.startsWith(`${imagesDir}/`)) {
+        return null;
+      }
+
+      return backend.readBytes(relativePath);
     },
 
     async storeImage(image) {

@@ -40,6 +40,7 @@ function sampleLibrary(): Library {
       },
     ],
     rankings: [],
+    tierLists: [],
     exportSettings: {
       workCoverTemplate: "default",
       workLongTemplate: "default",

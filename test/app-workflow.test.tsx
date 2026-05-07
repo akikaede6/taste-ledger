@@ -30,21 +30,9 @@ describe("app workflow", () => {
       await screen.findByRole("button", { name: /影视作品/ }),
     ).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("新作品"), {
-      target: { value: "作品 A" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建作品" }));
-
-    expect(
-      await screen.findByRole("button", { name: /作品 A/ }),
-    ).toBeInTheDocument();
-
     fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
     fireEvent.change(screen.getByLabelText("维度名称 1"), {
       target: { value: "剧情" },
-    });
-    fireEvent.change(screen.getByLabelText("评分 1"), {
-      target: { value: "9" },
     });
     fireEvent.change(screen.getByLabelText("权重 1"), {
       target: { value: "2" },
@@ -54,11 +42,28 @@ describe("app workflow", () => {
     fireEvent.change(screen.getByLabelText("维度名称 2"), {
       target: { value: "音乐" },
     });
-    fireEvent.change(screen.getByLabelText("评分 2"), {
-      target: { value: "8" },
-    });
     fireEvent.change(screen.getByLabelText("权重 2"), {
       target: { value: "1" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存评分维度" }));
+    await flushUi();
+
+    fireEvent.change(screen.getByLabelText("新作品"), {
+      target: { value: "作品 A" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建作品" }));
+
+    expect(
+      await screen.findByRole("button", { name: /作品 A/ }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("评分 1"), {
+      target: { value: "9" },
+    });
+
+    fireEvent.change(screen.getByLabelText("评分 2"), {
+      target: { value: "8" },
     });
 
     await screen.findByText("当前评分 8.67");
@@ -99,6 +104,16 @@ describe("app workflow", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
     await screen.findByRole("button", { name: /影视作品/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
+    fireEvent.change(screen.getByLabelText("维度名称 1"), {
+      target: { value: "剧情" },
+    });
+    fireEvent.change(screen.getByLabelText("权重 1"), {
+      target: { value: "1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存评分维度" }));
+    await flushUi();
 
     await createScoredWork("作品 A", 8);
     await createScoredWork("作品 B", 10);
@@ -143,6 +158,16 @@ describe("app workflow", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
     await screen.findByRole("button", { name: /影视作品/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
+    fireEvent.change(screen.getByLabelText("维度名称 1"), {
+      target: { value: "剧情" },
+    });
+    fireEvent.change(screen.getByLabelText("权重 1"), {
+      target: { value: "1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存评分维度" }));
+    await flushUi();
 
     await createScoredWork("作品 A", 8);
     await createScoredWork("作品 B", 10);
@@ -198,6 +223,16 @@ describe("app workflow", () => {
     fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
     await screen.findByRole("button", { name: /影视作品/ });
 
+    fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
+    fireEvent.change(screen.getByLabelText("维度名称 1"), {
+      target: { value: "剧情" },
+    });
+    fireEvent.change(screen.getByLabelText("权重 1"), {
+      target: { value: "1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存评分维度" }));
+    await flushUi();
+
     await createScoredWork("作品 A", 8);
 
     fireEvent.click(screen.getByRole("button", { name: "导出封面图" }));
@@ -214,6 +249,55 @@ describe("app workflow", () => {
       );
     });
   });
+
+  it("exports a five-level tier image with cover-based placement", async () => {
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "本地个人评分工具" });
+
+    fireEvent.change(screen.getByLabelText("新分类"), {
+      target: { value: "影视作品" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await screen.findByRole("button", { name: /影视作品/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
+    fireEvent.change(screen.getByLabelText("维度名称 1"), {
+      target: { value: "剧情" },
+    });
+    fireEvent.change(screen.getByLabelText("权重 1"), {
+      target: { value: "1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存评分维度" }));
+    await flushUi();
+
+    await createScoredWork("作品 A", 8);
+    await createScoredWork("作品 B", 6);
+
+    fireEvent.click(screen.getByRole("button", { name: "创建分级" }));
+    await screen.findByRole("button", { name: /五档分级/ });
+
+    fireEvent.change(screen.getByLabelText("移动 作品 A"), {
+      target: { value: "tier-1" },
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("移动 作品 A")).toHaveValue("tier-1");
+    });
+
+    fireEvent.change(screen.getByLabelText("移动 作品 B"), {
+      target: { value: "tier-2" },
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("移动 作品 B")).toHaveValue("tier-2");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "导出分级图" }));
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /已导出：exports\/tiers\/[^/]+-tier-\d+\.svg/,
+      );
+    });
+  });
 });
 
 async function createScoredWork(title: string, score: number) {
@@ -226,15 +310,8 @@ async function createScoredWork(title: string, score: number) {
     await screen.findByRole("button", { name: new RegExp(title) }),
   ).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
-  fireEvent.change(screen.getByLabelText("维度名称 1"), {
-    target: { value: "剧情" },
-  });
   fireEvent.change(screen.getByLabelText("评分 1"), {
     target: { value: String(score) },
-  });
-  fireEvent.change(screen.getByLabelText("权重 1"), {
-    target: { value: "1" },
   });
 
   await screen.findByText(`当前评分 ${score}`);
@@ -245,4 +322,8 @@ async function createScoredWork(title: string, score: number) {
       screen.getByRole("button", { name: new RegExp(title) }),
     ).toHaveTextContent(`${score} 分`);
   });
+}
+
+async function flushUi() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }

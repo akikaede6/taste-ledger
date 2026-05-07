@@ -1,4 +1,10 @@
-import type { Library, Ranking, RatingDimensionScore, Work } from "./model";
+import type {
+  Library,
+  Ranking,
+  RatingDimensionScore,
+  TierLevelId,
+  Work,
+} from "./model";
 
 export type WorkShareVariant = "cover" | "long";
 export type RankingShareVariant = "long";
@@ -34,6 +40,26 @@ export interface RankingSharePayload {
   categoryName: string;
   sortLabel: string;
   items: RankingShareItem[];
+}
+
+export interface TierListShareItem {
+  title: string;
+  coverImagePath: string | null;
+  coverDataUrl: string | null;
+}
+
+export interface TierListShareLevel {
+  id: TierLevelId;
+  name: string;
+  items: TierListShareItem[];
+}
+
+export interface TierListSharePayload {
+  variant: "tier";
+  tierListId: string;
+  tierListName: string;
+  categoryName: string;
+  levels: TierListShareLevel[];
 }
 
 const IMAGE_WIDTH = 1080;
@@ -137,6 +163,74 @@ export function createRankingShareImage(
     id: `${payload.rankingId}-${payload.variant}-${Date.now()}`,
     extension: "svg",
     bytes: new TextEncoder().encode(renderRankingShareSvg(payload)),
+  };
+}
+
+export function buildTierListSharePayload(
+  library: Library,
+  tierListId: string,
+  coverImages: Map<string, string> = new Map(),
+): TierListSharePayload {
+  const tierList = library.tierLists.find((item) => item.id === tierListId);
+
+  if (!tierList) {
+    throw new Error("Tier list not found.");
+  }
+
+  const category = library.categories.find(
+    (item) => item.id === tierList.categoryId,
+  );
+
+  if (!category) {
+    throw new Error("Tier list category not found.");
+  }
+
+  const levels = tierList.levels.map((level) => ({
+    id: level.id,
+    name: level.name,
+    items: level.workIds.flatMap((workId) => {
+      const work = library.works.find((item) => item.id === workId);
+
+      if (!work || work.categoryId !== tierList.categoryId) {
+        return [];
+      }
+
+      return [
+        {
+          title: work.title,
+          coverImagePath: work.coverImagePath,
+          coverDataUrl: work.coverImagePath
+            ? (coverImages.get(work.id) ?? null)
+            : null,
+        },
+      ];
+    }),
+  }));
+
+  if (levels.every((level) => level.items.length === 0)) {
+    throw new Error("Tier list has no assigned works.");
+  }
+
+  return {
+    variant: "tier",
+    tierListId: tierList.id,
+    tierListName: tierList.name,
+    categoryName: category.name,
+    levels,
+  };
+}
+
+export function createTierListShareImage(
+  library: Library,
+  tierListId: string,
+  coverImages: Map<string, string> = new Map(),
+): ShareImageFile {
+  const payload = buildTierListSharePayload(library, tierListId, coverImages);
+
+  return {
+    id: `${payload.tierListId}-${payload.variant}-${Date.now()}`,
+    extension: "svg",
+    bytes: new TextEncoder().encode(renderTierListShareSvg(payload)),
   };
 }
 
@@ -327,6 +421,111 @@ export function renderRankingShareSvg(payload: RankingSharePayload): string {
   return parts.join("");
 }
 
+export function renderTierListShareSvg(payload: TierListSharePayload): string {
+  const renderedLevels = payload.levels.map((level) => ({
+    ...level,
+    renderedItems: level.items.map((item) => ({
+      ...item,
+      titleLines: createTierTitleLines(item.title),
+    })),
+  }));
+  const levelHeights = renderedLevels.map((level) => {
+    const rowCount = Math.max(1, Math.ceil(level.renderedItems.length / 4));
+    return Math.max(182, rowCount * 234 + 26);
+  });
+  const rowsHeight = levelHeights.reduce((sum, height) => sum + height, 0);
+  const height = Math.max(920, 372 + rowsHeight + 96);
+  let cursor = 112;
+  const parts: string[] = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${IMAGE_WIDTH}" height="${height}" viewBox="0 0 ${IMAGE_WIDTH} ${height}" role="img" aria-label="${escapeXml(
+      payload.tierListName,
+    )}">`,
+    `<rect width="${IMAGE_WIDTH}" height="${height}" fill="#f8fafc"/>`,
+    `<rect x="48" y="48" width="984" height="${height - 96}" rx="36" fill="#ffffff" stroke="#dbe3ef" stroke-width="2"/>`,
+    `<text x="${TEXT_LEFT}" y="${cursor}" fill="#64748b" font-family="system-ui, sans-serif" font-size="30" font-weight="700">${escapeXml(
+      payload.categoryName,
+    )}</text>`,
+  ];
+
+  cursor += 76;
+  parts.push(
+    `<text x="${TEXT_LEFT}" y="${cursor}" fill="#111827" font-family="system-ui, sans-serif" font-size="58" font-weight="800">${escapeXml(
+      payload.tierListName,
+    )}</text>`,
+  );
+
+  cursor += 54;
+  parts.push(
+    `<text x="${TEXT_LEFT}" y="${cursor}" fill="#0f766e" font-family="system-ui, sans-serif" font-size="34" font-weight="800">${payload.levels.length} 个等级</text>`,
+  );
+
+  cursor += 70;
+
+  renderedLevels.forEach((level, index) => {
+    const rowHeight = levelHeights[index];
+    const rowTop = cursor - 28;
+    const fill = index % 2 === 0 ? "#f8fafc" : "#ffffff";
+    const labelFill = getTierLabelColor(level.id);
+
+    parts.push(
+      `<rect x="88" y="${rowTop}" width="904" height="${rowHeight - 12}" rx="22" fill="${fill}" stroke="#e2e8f0" stroke-width="1"/>`,
+      `<rect x="112" y="${cursor - 10}" width="68" height="68" rx="18" fill="${labelFill}"/>`,
+      `<text x="146" y="${cursor + 34}" fill="#ffffff" font-family="system-ui, sans-serif" font-size="28" font-weight="900" text-anchor="middle">${escapeXml(
+        level.name,
+      )}</text>`,
+      `<text x="214" y="${cursor + 24}" fill="#111827" font-family="system-ui, sans-serif" font-size="28" font-weight="800">${escapeXml(
+        `${level.items.length} 作品`,
+      )}</text>`,
+    );
+
+    const columns = 4;
+    const cardWidth = 166;
+    const cardHeight = 200;
+    const gapX = 14;
+    const gapY = 18;
+    const startX = 214;
+    const startY = cursor + 46;
+
+    level.renderedItems.forEach((item, itemIndex) => {
+      const column = itemIndex % columns;
+      const row = Math.floor(itemIndex / columns);
+      const x = startX + column * (cardWidth + gapX);
+      const y = startY + row * (cardHeight + gapY);
+
+      parts.push(
+        `<rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" rx="18" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>`,
+        `<rect x="${x + 10}" y="${y + 10}" width="${cardWidth - 20}" height="116" rx="14" fill="#e2e8f0"/>`,
+      );
+
+      if (item.coverDataUrl) {
+        parts.push(
+          `<image href="${escapeXml(item.coverDataUrl)}" x="${x + 10}" y="${y + 10}" width="${cardWidth - 20}" height="116" preserveAspectRatio="xMidYMid slice"/>`,
+        );
+      } else {
+        parts.push(
+          `<text x="${x + 20}" y="${y + 74}" fill="#64748b" font-family="system-ui, sans-serif" font-size="22" font-weight="700">${escapeXml(
+            item.coverImagePath ? "封面未读取" : "未设置封面",
+          )}</text>`,
+        );
+      }
+
+      item.titleLines.forEach((line, lineIndex) => {
+        parts.push(
+          `<text x="${x + 14}" y="${y + 154 + lineIndex * 26}" fill="#111827" font-family="system-ui, sans-serif" font-size="22" font-weight="800">${escapeXml(
+            line,
+          )}</text>`,
+        );
+      });
+    });
+
+    cursor += rowHeight;
+  });
+
+  parts.push("</svg>");
+
+  return parts.join("");
+}
+
 function trimToNull(value: string): string | null {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
@@ -356,6 +555,31 @@ function createRankingTitleLines(value: string): string[] {
   }
 
   return [lines[0], `${lines[1].slice(0, 17)}...`];
+}
+
+function createTierTitleLines(value: string): string[] {
+  const lines = wrapText(value, 12);
+
+  if (lines.length <= 2) {
+    return lines;
+  }
+
+  return [lines[0], `${lines[1].slice(0, 9)}...`];
+}
+
+function getTierLabelColor(levelId: TierLevelId): string {
+  switch (levelId) {
+    case "tier-1":
+      return "#0f766e";
+    case "tier-2":
+      return "#2563eb";
+    case "tier-3":
+      return "#7c3aed";
+    case "tier-4":
+      return "#ea580c";
+    case "tier-5":
+      return "#b91c1c";
+  }
 }
 
 function getRankingSortLabel(ranking: Ranking, works: Work[]): string {
