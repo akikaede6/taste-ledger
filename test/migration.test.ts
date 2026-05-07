@@ -65,7 +65,7 @@ describe("data directory migration", () => {
 
     library = createRanking(library, {
       categoryId: library.categories[0].id,
-      name: "从夯到拉",
+      name: "作品排行",
       mode: "finalScore",
     }).library;
 

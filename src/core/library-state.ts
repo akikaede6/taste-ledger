@@ -32,10 +32,12 @@ import {
   updateTierList,
 } from "./library-actions";
 import { getRankingWorks } from "./ranking";
+import { createDisplayImageDataUrl } from "./image-utils";
 import {
   createRankingShareImage,
   createTierListShareImage,
   createWorkShareImage,
+  type ShareImageFile,
   type WorkShareVariant,
 } from "./share-export";
 import type { LibraryRepository } from "./repository";
@@ -67,8 +69,11 @@ export interface LibraryController {
   updateSelectedWork(input: WorkUpdateInput): Promise<void>;
   deleteSelectedWork(): Promise<void>;
   storeSelectedWorkCover(fileName: string, bytes: Uint8Array): Promise<void>;
+  prepareSelectedWorkShare(variant: WorkShareVariant): Promise<ShareImageFile>;
   exportSelectedWorkShare(variant: WorkShareVariant): Promise<string>;
+  prepareSelectedRankingShare(): Promise<ShareImageFile>;
   exportSelectedRankingShare(): Promise<string>;
+  prepareSelectedTierListShare(): Promise<ShareImageFile>;
   exportSelectedTierListShare(): Promise<string>;
   createRanking(input: RankingInput): Promise<void>;
   updateSelectedRanking(input: RankingUpdateInput): Promise<void>;
@@ -468,14 +473,33 @@ export function createLibraryController(
       await saveLibrary(nextLibrary);
     },
 
-    async exportSelectedWorkShare(variant) {
+    async prepareSelectedWorkShare(variant) {
       const workId = state.selectedWorkId;
 
       if (!workId) {
         throw new Error("Work not selected.");
       }
 
-      const image = createWorkShareImage(state.library, workId, variant);
+      const work = state.library.works.find((item) => item.id === workId);
+
+      if (!work) {
+        throw new Error("Work not found.");
+      }
+
+      const coverDataUrl =
+        work.coverImagePath &&
+        (await buildCoverDataUrl(repository, work.coverImagePath));
+
+      return createWorkShareImage(
+        state.library,
+        workId,
+        variant,
+        coverDataUrl ?? null,
+      );
+    },
+
+    async exportSelectedWorkShare(variant) {
+      const image = await controller.prepareSelectedWorkShare(variant);
       return repository.storeExport({
         kind: "works",
         id: image.id,
@@ -484,7 +508,7 @@ export function createLibraryController(
       });
     },
 
-    async exportSelectedRankingShare() {
+    async prepareSelectedRankingShare() {
       const rankingId = state.selectedRankingId;
 
       if (!rankingId) {
@@ -500,7 +524,11 @@ export function createLibraryController(
       }
 
       const works = getRankingWorks(state.library, ranking);
-      const image = createRankingShareImage(state.library, ranking.id, works);
+      return createRankingShareImage(state.library, ranking.id, works);
+    },
+
+    async exportSelectedRankingShare() {
+      const image = await controller.prepareSelectedRankingShare();
 
       return repository.storeExport({
         kind: "rankings",
@@ -510,7 +538,7 @@ export function createLibraryController(
       });
     },
 
-    async exportSelectedTierListShare() {
+    async prepareSelectedTierListShare() {
       const tierListId = state.selectedTierListId;
 
       if (!tierListId) {
@@ -530,11 +558,11 @@ export function createLibraryController(
         state.library,
         tierList,
       );
-      const image = createTierListShareImage(
-        state.library,
-        tierList.id,
-        coverImages,
-      );
+      return createTierListShareImage(state.library, tierList.id, coverImages);
+    },
+
+    async exportSelectedTierListShare() {
+      const image = await controller.prepareSelectedTierListShare();
 
       return repository.storeExport({
         kind: "tiers",
@@ -717,49 +745,31 @@ async function buildCoverImageMap(
         return null;
       }
 
-      const bytes = await repository.readImage(work.coverImagePath);
+      const coverDataUrl = await buildCoverDataUrl(
+        repository,
+        work.coverImagePath,
+      );
 
-      if (!bytes) {
+      if (!coverDataUrl) {
         return null;
       }
 
-      return [
-        work.id,
-        `data:${getImageMimeType(work.coverImagePath)};base64,${bytesToBase64(
-          bytes,
-        )}`,
-      ] as const;
+      return [work.id, coverDataUrl] as const;
     }),
   );
 
   return new Map(entries.filter((entry) => entry !== null));
 }
 
-function getImageMimeType(path: string): string {
-  const extension = path.split(".").pop()?.toLowerCase();
+async function buildCoverDataUrl(
+  repository: LibraryRepository,
+  relativePath: string,
+): Promise<string | null> {
+  const bytes = await repository.readImage(relativePath);
 
-  if (extension === "jpg" || extension === "jpeg") {
-    return "image/jpeg";
+  if (!bytes) {
+    return null;
   }
 
-  if (extension === "webp") {
-    return "image/webp";
-  }
-
-  if (extension === "svg") {
-    return "image/svg+xml";
-  }
-
-  return "image/png";
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunkSize = 0x8000;
-
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
-  }
-
-  return globalThis.btoa(binary);
+  return createDisplayImageDataUrl(relativePath, bytes);
 }

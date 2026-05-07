@@ -1,4 +1,11 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  nativeImage,
+} = require("electron");
 const fs = require("node:fs/promises");
 const { randomUUID } = require("node:crypto");
 const path = require("node:path");
@@ -10,6 +17,30 @@ app.commandLine.appendSwitch("disable-gpu");
 
 const dataRoot = () =>
   path.join(app.getPath("documents"), "Ranking", "ranking-data");
+
+ipcMain.handle("ranking-shell:choose-directory", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openDirectory", "createDirectory"],
+  });
+
+  return result.canceled ? null : (result.filePaths[0] ?? null);
+});
+
+ipcMain.handle(
+  "ranking-shell:write-file",
+  async (_event, { directory, fileName, bytes }) => {
+    const targetPath = path.join(directory, sanitizeFileName(fileName));
+
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(targetPath, Buffer.from(bytes));
+
+    return targetPath;
+  },
+);
+
+ipcMain.handle("ranking-shell:copy-image", async (_event, bytes) => {
+  clipboard.writeImage(nativeImage.createFromBuffer(Buffer.from(bytes)));
+});
 
 ipcMain.handle(
   "ranking-storage:ensure-directory",
@@ -87,7 +118,7 @@ function createWindow() {
     height: 860,
     minWidth: 960,
     minHeight: 640,
-    title: "Ranking",
+    title: "Taste Ledger",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -150,6 +181,10 @@ function isNodeErrorWithCode(error, code) {
     "code" in error &&
     error.code === code
   );
+}
+
+function sanitizeFileName(value) {
+  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
 }
 
 async function renameWithOverwrite(from, to) {

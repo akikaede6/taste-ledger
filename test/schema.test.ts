@@ -71,7 +71,7 @@ function sampleLibrary(): Library {
       {
         id: "rank-film",
         categoryId: "cat-film",
-        name: "从夯到拉",
+        name: "作品排行",
         mode: "finalScore",
         dimensionId: null,
         workIds: ["work-a"],

@@ -641,6 +641,77 @@ select:disabled {
   font-weight: 700;
 }
 
+.export-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.export-dialog {
+  width: min(920px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.2);
+}
+
+.export-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.export-dialog-preview {
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  overflow: auto;
+  max-height: min(65vh, 960px);
+}
+
+.export-dialog-preview img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.export-dialog-meta {
+  display: grid;
+  gap: 10px;
+}
+
+.export-dialog-meta p {
+  margin: 0;
+}
+
+.export-directory-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.export-directory-path {
+  color: #384252;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.export-dialog-actions {
+  justify-content: flex-end;
+}
+
 .work-share-preview {
   border: 1px solid #dbe3ef;
   border-radius: 8px;
@@ -927,8 +998,17 @@ select:disabled {
 }
 
 @media (max-width: 560px) {
+  .export-overlay {
+    padding: 12px;
+  }
+
+  .export-directory-row,
   .dimension-header {
-    flex-direction: column;
+    display: grid;
+  }
+
+  .export-directory-row {
+    grid-template-columns: 1fr;
   }
 
   .ranking-create-grid,

@@ -18,7 +18,7 @@ describe("app workflow", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "本地个人评分工具" }),
+      await screen.findByRole("heading", { name: "Taste Ledger" }),
     ).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("新分类"), {
@@ -97,7 +97,7 @@ describe("app workflow", () => {
   it("creates an automatic ranking and refreshes it after scoring changes", async () => {
     render(<App />);
 
-    await screen.findByRole("heading", { name: "本地个人评分工具" });
+    await screen.findByRole("heading", { name: "Taste Ledger" });
 
     fireEvent.change(screen.getByLabelText("新分类"), {
       target: { value: "影视作品" },
@@ -118,10 +118,13 @@ describe("app workflow", () => {
     await createScoredWork("作品 A", 8);
     await createScoredWork("作品 B", 10);
 
+    fireEvent.change(screen.getByLabelText("新排行"), {
+      target: { value: "作品排行" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "创建排行" }));
 
     expect(
-      await screen.findByRole("button", { name: /从夯到拉/ }),
+      await screen.findByRole("button", { name: /作品排行/ }),
     ).toBeInTheDocument();
 
     await waitFor(() => {
@@ -151,7 +154,7 @@ describe("app workflow", () => {
   it("exports ranking share images in the displayed order", async () => {
     render(<App />);
 
-    await screen.findByRole("heading", { name: "本地个人评分工具" });
+    await screen.findByRole("heading", { name: "Taste Ledger" });
 
     fireEvent.change(screen.getByLabelText("新分类"), {
       target: { value: "影视作品" },
@@ -172,8 +175,11 @@ describe("app workflow", () => {
     await createScoredWork("作品 A", 8);
     await createScoredWork("作品 B", 10);
 
+    fireEvent.change(screen.getByLabelText("新排行"), {
+      target: { value: "作品排行" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "创建排行" }));
-    await screen.findByRole("button", { name: /从夯到拉/ });
+    await screen.findByRole("button", { name: /作品排行/ });
 
     await waitFor(() => {
       const rows = within(screen.getByLabelText("排行作品")).getAllByRole(
@@ -184,9 +190,13 @@ describe("app workflow", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "导出排行长图" }));
+    expect(
+      await screen.findByRole("dialog", { name: "排行长图预览" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "导出文件" }));
     await waitFor(() => {
       expect(screen.getByRole("status")).toHaveTextContent(
-        /已导出：exports\/rankings\/[^/]+-long-\d+\.svg/,
+        /已开始下载：.+\.(png|svg)/,
       );
     });
   });
@@ -194,7 +204,7 @@ describe("app workflow", () => {
   it("prevents empty ranking share exports", async () => {
     render(<App />);
 
-    await screen.findByRole("heading", { name: "本地个人评分工具" });
+    await screen.findByRole("heading", { name: "Taste Ledger" });
 
     fireEvent.change(screen.getByLabelText("新分类"), {
       target: { value: "影视作品" },
@@ -202,6 +212,9 @@ describe("app workflow", () => {
     fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
     await screen.findByRole("button", { name: /影视作品/ });
 
+    fireEvent.change(screen.getByLabelText("新排行"), {
+      target: { value: "空排行" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "创建排行" }));
 
     expect(
@@ -215,7 +228,7 @@ describe("app workflow", () => {
   it("exports work share images into the data directory", async () => {
     render(<App />);
 
-    await screen.findByRole("heading", { name: "本地个人评分工具" });
+    await screen.findByRole("heading", { name: "Taste Ledger" });
 
     fireEvent.change(screen.getByLabelText("新分类"), {
       target: { value: "影视作品" },
@@ -236,16 +249,24 @@ describe("app workflow", () => {
     await createScoredWork("作品 A", 8);
 
     fireEvent.click(screen.getByRole("button", { name: "导出封面图" }));
+    expect(
+      await screen.findByRole("dialog", { name: "作品封面图预览" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "导出文件" }));
     await waitFor(() => {
       expect(screen.getByRole("status")).toHaveTextContent(
-        /已导出：exports\/works\/[^/]+-cover-\d+\.svg/,
+        /已开始下载：.+\.(png|svg)/,
       );
     });
 
     fireEvent.click(screen.getByRole("button", { name: "导出长图" }));
+    expect(
+      await screen.findByRole("dialog", { name: "作品长图预览" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "导出文件" }));
     await waitFor(() => {
       expect(screen.getByRole("status")).toHaveTextContent(
-        /已导出：exports\/works\/[^/]+-long-\d+\.svg/,
+        /已开始下载：.+\.(png|svg)/,
       );
     });
   });
@@ -253,7 +274,7 @@ describe("app workflow", () => {
   it("exports a five-level tier image with cover-based placement", async () => {
     render(<App />);
 
-    await screen.findByRole("heading", { name: "本地个人评分工具" });
+    await screen.findByRole("heading", { name: "Taste Ledger" });
 
     fireEvent.change(screen.getByLabelText("新分类"), {
       target: { value: "影视作品" },
@@ -275,7 +296,7 @@ describe("app workflow", () => {
     await createScoredWork("作品 B", 6);
 
     fireEvent.click(screen.getByRole("button", { name: "创建分级" }));
-    await screen.findByRole("button", { name: /五档分级/ });
+    await screen.findByRole("button", { name: /五级分级/ });
 
     fireEvent.change(screen.getByLabelText("移动 作品 A"), {
       target: { value: "tier-1" },
@@ -292,9 +313,13 @@ describe("app workflow", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "导出分级图" }));
+    expect(
+      await screen.findByRole("dialog", { name: "五级分级预览" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "导出文件" }));
     await waitFor(() => {
       expect(screen.getByRole("status")).toHaveTextContent(
-        /已导出：exports\/tiers\/[^/]+-tier-\d+\.svg/,
+        /已开始下载：.+\.(png|svg)/,
       );
     });
   });

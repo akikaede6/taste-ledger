@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-  appId: "local.ranking.app",
-  appName: "Ranking",
+  appId: "io.github.akikaede6.tasteledger",
+  appName: "Taste Ledger",
   webDir: "dist",
 };
 

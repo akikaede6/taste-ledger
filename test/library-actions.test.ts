@@ -77,7 +77,7 @@ function libraryWithCategory(): Library {
       {
         id: "ranking-film",
         categoryId: "cat-film",
-        name: "从夯到拉",
+        name: "作品排行",
         mode: "finalScore",
         dimensionId: null,
         workIds: ["work-a"],
@@ -407,12 +407,12 @@ describe("category actions", () => {
 
     const result = createRanking(rankingLibrary(), {
       categoryId: "cat-film",
-      name: "从夯到拉",
+      name: "作品排行",
       mode: "finalScore",
     });
 
     expect(result.ranking).toMatchObject({
-      name: "从夯到拉",
+      name: "作品排行",
       mode: "finalScore",
       dimensionId: null,
       createdAt: rankingNow,
@@ -444,7 +444,7 @@ describe("category actions", () => {
           {
             id: "ranking-film",
             categoryId: "cat-film",
-            name: "从夯到拉",
+            name: "作品排行",
             mode: "finalScore",
             dimensionId: null,
             workIds: ["work-a", "work-c", "work-b"],
@@ -503,11 +503,11 @@ describe("category actions", () => {
 
     const created = createTierList(rankingLibrary(), {
       categoryId: "cat-film",
-      name: "五档分级",
+      name: "五级分级",
     });
 
     expect(created.tierList).toMatchObject({
-      name: "五档分级",
+      name: "五级分级",
       categoryId: "cat-film",
       createdAt: rankingNow,
       updatedAt: rankingNow,

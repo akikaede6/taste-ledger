@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Ranking</string>
-    <string name="title_activity_main">Ranking</string>
-    <string name="package_name">local.ranking.app</string>
-    <string name="custom_url_scheme">local.ranking.app</string>
+    <string name="app_name">Taste Ledger</string>
+    <string name="title_activity_main">Taste Ledger</string>
+    <string name="package_name">io.github.akikaede6.tasteledger</string>
+    <string name="custom_url_scheme">io.github.akikaede6.tasteledger</string>
 </resources>

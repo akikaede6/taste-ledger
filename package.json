@@ -1,9 +1,9 @@
 {
-  "name": "ranking",
+  "name": "taste-ledger",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local-first personal rating and ranking app.",
+  "description": "Local-first taste ledger for ratings, rankings, and tier lists.",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -52,8 +52,8 @@
     "vitest": "^4.0.0"
   },
   "build": {
-    "appId": "local.ranking.app",
-    "productName": "Ranking",
+    "appId": "io.github.akikaede6.tasteledger",
+    "productName": "Taste Ledger",
     "files": [
       "dist/**/*",
       "electron/**/*",

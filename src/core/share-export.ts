@@ -15,6 +15,7 @@ export interface WorkSharePayload {
   title: string;
   categoryName: string;
   coverImagePath: string | null;
+  coverDataUrl: string | null;
   finalScore: number | null;
   ratingDimensions: RatingDimensionScore[];
   shortReview: string | null;
@@ -69,6 +70,7 @@ export function buildWorkSharePayload(
   library: Library,
   workId: string,
   variant: WorkShareVariant,
+  coverDataUrl: string | null = null,
 ): WorkSharePayload {
   const work = library.works.find((item) => item.id === workId);
 
@@ -90,6 +92,7 @@ export function buildWorkSharePayload(
     title: work.title,
     categoryName: category.name,
     coverImagePath: work.coverImagePath,
+    coverDataUrl,
     finalScore: work.finalScore,
     ratingDimensions: work.ratingDimensions,
     shortReview: trimToNull(work.shortReview),
@@ -101,8 +104,9 @@ export function createWorkShareImage(
   library: Library,
   workId: string,
   variant: WorkShareVariant,
+  coverDataUrl: string | null = null,
 ): ShareImageFile {
-  const payload = buildWorkSharePayload(library, workId, variant);
+  const payload = buildWorkSharePayload(library, workId, variant, coverDataUrl);
 
   return {
     id: `${payload.workId}-${payload.variant}-${Date.now()}`,
@@ -287,10 +291,19 @@ export function renderWorkShareSvg(payload: WorkSharePayload): string {
   cursor += 56;
   parts.push(
     `<rect x="${TEXT_LEFT}" y="${cursor}" width="856" height="360" rx="28" fill="#e2e8f0"/>`,
-    `<text x="${TEXT_LEFT + 36}" y="${cursor + 190}" fill="#475569" font-family="system-ui, sans-serif" font-size="30" font-weight="700">${escapeXml(
-      coverLabel,
-    )}</text>`,
   );
+
+  if (payload.coverDataUrl) {
+    parts.push(
+      `<image href="${escapeXml(payload.coverDataUrl)}" x="${TEXT_LEFT}" y="${cursor}" width="856" height="360" preserveAspectRatio="xMidYMid slice"/>`,
+    );
+  } else {
+    parts.push(
+      `<text x="${TEXT_LEFT + 36}" y="${cursor + 190}" fill="#475569" font-family="system-ui, sans-serif" font-size="30" font-weight="700">${escapeXml(
+        coverLabel,
+      )}</text>`,
+    );
+  }
 
   cursor += 430;
 
@@ -384,7 +397,7 @@ export function renderRankingShareSvg(payload: RankingSharePayload): string {
 
   cursor += 78;
   parts.push(
-    `<text x="${TEXT_LEFT}" y="${cursor}" fill="#1f2937" font-family="system-ui, sans-serif" font-size="32" font-weight="800">从夯到拉</text>`,
+    `<text x="${TEXT_LEFT}" y="${cursor}" fill="#1f2937" font-family="system-ui, sans-serif" font-size="32" font-weight="800">作品顺位</text>`,
   );
 
   cursor += 42;
@@ -431,7 +444,7 @@ export function renderTierListShareSvg(payload: TierListSharePayload): string {
   }));
   const levelHeights = renderedLevels.map((level) => {
     const rowCount = Math.max(1, Math.ceil(level.renderedItems.length / 4));
-    return Math.max(182, rowCount * 234 + 26);
+    return Math.max(182, 54 + rowCount * 200 + Math.max(0, rowCount - 1) * 18);
   });
   const rowsHeight = levelHeights.reduce((sum, height) => sum + height, 0);
   const height = Math.max(920, 372 + rowsHeight + 96);

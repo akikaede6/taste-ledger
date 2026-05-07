@@ -2,8 +2,11 @@ import {
   ArrowDown,
   ArrowUp,
   BookOpen,
+  ClipboardCopy,
+  Download,
   FileText,
   FolderPlus,
+  FolderOpen,
   ImagePlus,
   Library,
   Layers,
@@ -15,6 +18,7 @@ import {
   Star,
   Trash2,
   Trophy,
+  X,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -44,11 +48,18 @@ import {
   getRankingWorks,
   type RankingDimensionOption,
 } from "./core/ranking";
+import {
+  convertSvgTextToExportFile,
+  copyImageToClipboard,
+  createDisplayImageDataUrl,
+  createSvgDataUrl,
+} from "./core/image-utils";
 import type { LibraryRepository } from "./core/repository";
 import { createLibraryRepository } from "./core/repository";
 import { calculateFinalScore } from "./core/scoring";
-import type { WorkShareVariant } from "./core/share-export";
+import type { ShareImageFile, WorkShareVariant } from "./core/share-export";
 import { createRuntimeBackend } from "./platform/runtime-backend";
+import { getDesktopBridge } from "./platform/runtime-bridge";
 
 interface WorkSaveInput {
   title: string;
@@ -67,11 +78,25 @@ interface TierListSaveInput {
   name: string;
 }
 
+interface ExportDialogState {
+  title: string;
+  svgText: string;
+  previewUrl: string;
+  fileNameBase: string;
+  canRasterize: boolean;
+}
+
+interface ExportPreferences {
+  directory: string | null;
+}
+
 const RANKING_MODE_LABELS: Record<RankingMode, string> = {
   finalScore: "最终评分",
   dimension: "单维度评分",
   manual: "手动排序",
 };
+
+const EXPORT_DIRECTORY_KEY = "taste-ledger:export-directory";
 
 export function App() {
   const [repository, setRepository] = useState<LibraryRepository | null>(null);
@@ -116,13 +141,20 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   const { state, controller } = useLibraryState(repository);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newWorkTitle, setNewWorkTitle] = useState("");
-  const [newRankingName, setNewRankingName] = useState("从夯到拉");
+  const [newRankingName, setNewRankingName] = useState("");
   const [newRankingMode, setNewRankingMode] =
     useState<RankingMode>("finalScore");
   const [newRankingDimensionId, setNewRankingDimensionId] = useState("");
-  const [newTierListName, setNewTierListName] = useState("五档分级");
+  const [newTierListName, setNewTierListName] = useState("五级分级");
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [exportDialog, setExportDialog] = useState<ExportDialogState | null>(
+    null,
+  );
+  const [exportPreferences, setExportPreferences] = useState<ExportPreferences>(
+    () => loadExportPreferences(),
+  );
+  const desktopBridge = getDesktopBridge();
 
   const categories = useMemo(
     () => sortCategoriesByRecentUpdate(state.library.categories),
@@ -178,6 +210,10 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     ? getRankingWorks(state.library, selectedRanking)
     : [];
   const coverImageUrls = useCoverImageUrls(repository, categoryWorks);
+
+  useEffect(() => {
+    storeExportPreferences(exportPreferences);
+  }, [exportPreferences]);
 
   async function runAction<T>(action: () => Promise<T>): Promise<T | null> {
     setActionError(null);
@@ -276,34 +312,47 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     );
   }
 
-  async function handleExportWorkShare(variant: WorkShareVariant) {
-    const exportPath = await runAction(async () =>
-      controller.exportSelectedWorkShare(variant),
-    );
+  async function openExportDialog(
+    title: string,
+    createShareFile: () => Promise<ShareImageFile>,
+  ) {
+    const shareFile = await runAction(createShareFile);
 
-    if (exportPath) {
-      setActionMessage(`已导出：${exportPath}`);
+    if (!shareFile) {
+      return;
     }
+
+    const svgText = new TextDecoder().decode(shareFile.bytes);
+    setExportDialog({
+      title,
+      svgText,
+      previewUrl: createSvgDataUrl(svgText),
+      fileNameBase: sanitizeExportFileStem(shareFile.id),
+      canRasterize: canRasterizeSvgForExport(),
+    });
+  }
+
+  async function handleExportWorkShare(variant: WorkShareVariant) {
+    const label = variant === "cover" ? "作品封面图预览" : "作品长图预览";
+    await openExportDialog(label, () =>
+      controller.prepareSelectedWorkShare(variant),
+    );
   }
 
   async function handleExportRankingShare() {
-    const exportPath = await runAction(async () =>
-      controller.exportSelectedRankingShare(),
+    await openExportDialog("排行长图预览", () =>
+      controller.prepareSelectedRankingShare(),
     );
-
-    if (exportPath) {
-      setActionMessage(`已导出：${exportPath}`);
-    }
   }
 
   async function handleExportTierListShare() {
-    const exportPath = await runAction(async () =>
-      controller.exportSelectedTierListShare(),
+    await openExportDialog("五级分级预览", () =>
+      controller.prepareSelectedTierListShare(),
     );
+  }
 
-    if (exportPath) {
-      setActionMessage(`已导出：${exportPath}`);
-    }
+  function closeExportDialog() {
+    setExportDialog(null);
   }
 
   async function handleCreateRanking(event: FormEvent<HTMLFormElement>) {
@@ -345,7 +394,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         mode: newRankingMode,
         dimensionId: selectedDimensionId,
       });
-      setNewRankingName("从夯到拉");
+      setNewRankingName("");
       setNewRankingMode("finalScore");
       setNewRankingDimensionId("");
     });
@@ -394,7 +443,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         categoryId: selectedCategory.id,
         name,
       });
-      setNewTierListName("五档分级");
+      setNewTierListName("五级分级");
     });
   }
 
@@ -426,14 +475,114 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     await runAction(async () => controller.removeSelectedTierListWork(workId));
   }
 
+  async function handleChooseExportDirectory() {
+    if (!desktopBridge) {
+      return;
+    }
+
+    const directory = await runAction(async () =>
+      desktopBridge.chooseDirectory(),
+    );
+
+    if (directory) {
+      setExportPreferences({ directory });
+    }
+  }
+
+  async function handleCopyExportImage() {
+    if (!exportDialog) {
+      return;
+    }
+
+    const file = await runAction(async () =>
+      convertSvgTextToExportFile(exportDialog.svgText),
+    );
+
+    if (!file) {
+      return;
+    }
+
+    if (file.mimeType !== "image/png") {
+      setActionError("当前环境无法复制位图预览。");
+      return;
+    }
+
+    const copied = await runAction(async () => {
+      if (desktopBridge) {
+        await desktopBridge.copyImage(file.bytes);
+        return true;
+      }
+
+      await copyImageToClipboard(file.bytes, file.mimeType);
+      return true;
+    });
+
+    if (copied) {
+      setActionMessage("已复制图片到剪贴板。");
+      setExportDialog(null);
+    }
+  }
+
+  async function handleSaveExportFile() {
+    if (!exportDialog) {
+      return;
+    }
+
+    const file = await runAction(async () =>
+      convertSvgTextToExportFile(exportDialog.svgText),
+    );
+
+    if (!file) {
+      return;
+    }
+
+    const fileName = `${exportDialog.fileNameBase}.${file.extension}`;
+
+    if (desktopBridge) {
+      let directory = exportPreferences.directory;
+
+      if (!directory) {
+        const selectedDirectory = await runAction(async () =>
+          desktopBridge.chooseDirectory(),
+        );
+
+        if (!selectedDirectory) {
+          return;
+        }
+
+        directory = selectedDirectory;
+        setExportPreferences({ directory });
+      }
+
+      const savedPath = await runAction(async () =>
+        desktopBridge.writeFile({
+          directory,
+          fileName,
+          bytes: file.bytes,
+        }),
+      );
+
+      if (savedPath) {
+        setActionMessage(`已导出：${savedPath}`);
+        setExportDialog(null);
+      }
+
+      return;
+    }
+
+    downloadFile(file.bytes, fileName, file.mimeType);
+    setActionMessage(`已开始下载：${fileName}`);
+    setExportDialog(null);
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar" aria-label="分类">
         <div className="brand-row">
           <Library aria-hidden="true" size={24} />
           <div>
-            <p className="eyebrow">Ranking</p>
-            <h1>本地个人评分工具</h1>
+            <p className="eyebrow">Taste Ledger</p>
+            <h1>Taste Ledger</h1>
           </div>
         </div>
 
@@ -632,7 +781,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                         onChange={(event) =>
                           setNewRankingName(event.target.value)
                         }
-                        placeholder="从夯到拉"
+                        placeholder="输入排行名称"
                       />
 
                       <div className="ranking-create-grid">
@@ -744,7 +893,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
               <section className="panel">
                 <div className="panel-heading">
                   <Layers aria-hidden="true" size={18} />
-                  <h3>五档分级</h3>
+                  <h3>五级分级</h3>
                 </div>
 
                 {selectedCategory ? (
@@ -761,7 +910,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                           onChange={(event) =>
                             setNewTierListName(event.target.value)
                           }
-                          placeholder="五档分级"
+                          placeholder="五级分级"
                         />
                         <button
                           className="icon-button primary"
@@ -799,7 +948,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                           );
                         })
                       ) : (
-                        <p className="muted">这个分类还没有五档分级。</p>
+                        <p className="muted">这个分类还没有五级分级。</p>
                       )}
                     </div>
                   </>
@@ -828,7 +977,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   />
                 ) : (
                   <p className="muted">
-                    创建一个五档分级后，可以把作品放进 S 到 D。
+                    创建一个五级分级后，可以把作品放进 S 到 D。
                   </p>
                 )}
               </section>
@@ -917,6 +1066,100 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
           <p className="inline-message" role="status">
             {actionMessage}
           </p>
+        ) : null}
+
+        {exportDialog ? (
+          <div
+            className="export-overlay"
+            role="presentation"
+            onClick={closeExportDialog}
+          >
+            <div
+              className="export-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="export-dialog-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="export-dialog-header">
+                <div>
+                  <p className="eyebrow">导出预览</p>
+                  <h3 id="export-dialog-title">{exportDialog.title}</h3>
+                </div>
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label="关闭导出预览"
+                  onClick={closeExportDialog}
+                >
+                  <X aria-hidden="true" size={16} />
+                </button>
+              </div>
+
+              <div className="export-dialog-preview">
+                <img src={exportDialog.previewUrl} alt={exportDialog.title} />
+              </div>
+
+              <div className="export-dialog-meta">
+                <p className="muted">
+                  预览文件：{exportDialog.fileNameBase}.
+                  {exportDialog.canRasterize ? "png" : "svg"}
+                </p>
+
+                {desktopBridge ? (
+                  <div className="export-directory-row">
+                    <div>
+                      <label>导出文件夹</label>
+                      <p className="export-directory-path">
+                        {exportPreferences.directory ?? "未选择"}
+                      </p>
+                    </div>
+                    <button
+                      className="text-button"
+                      type="button"
+                      onClick={() => void handleChooseExportDirectory()}
+                    >
+                      <FolderOpen aria-hidden="true" size={16} />
+                      选择文件夹
+                    </button>
+                  </div>
+                ) : (
+                  <p className="inline-hint">浏览器环境会直接下载文件。</p>
+                )}
+              </div>
+
+              <div className="button-row export-dialog-actions">
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={() => void handleCopyExportImage()}
+                  disabled={
+                    !exportDialog.canRasterize ||
+                    (!desktopBridge && !canCopyImageToClipboard())
+                  }
+                >
+                  <ClipboardCopy aria-hidden="true" size={16} />
+                  复制图片
+                </button>
+                <button
+                  className="text-button primary"
+                  type="button"
+                  onClick={() => void handleSaveExportFile()}
+                >
+                  <Download aria-hidden="true" size={16} />
+                  导出文件
+                </button>
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={closeExportDialog}
+                >
+                  <X aria-hidden="true" size={16} />
+                  取消
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
       </section>
     </main>
@@ -1732,7 +1975,7 @@ function TierListEditor({
         )}
       </div>
 
-      <div className="tier-board" aria-label="五档分级">
+      <div className="tier-board" aria-label="五级分级">
         {tierList.levels.map((level) => {
           const levelWorks = level.workIds.flatMap((workId) => {
             const work = workById.get(workId);
@@ -2060,9 +2303,7 @@ function useCoverImageUrls(
 
         return [
           work.id,
-          `data:${getImageMimeType(work.coverImagePath)};base64,${bytesToBase64(
-            bytes,
-          )}`,
+          await createDisplayImageDataUrl(work.coverImagePath, bytes),
         ] as const;
       }),
     ).then((entries) => {
@@ -2079,37 +2320,113 @@ function useCoverImageUrls(
   return urls;
 }
 
-function getImageMimeType(path: string): string {
-  const extension = path.split(".").pop()?.toLowerCase();
-
-  if (extension === "jpg" || extension === "jpeg") {
-    return "image/jpeg";
+function loadExportPreferences(): ExportPreferences {
+  if (typeof window === "undefined") {
+    return { directory: null };
   }
 
-  if (extension === "webp") {
-    return "image/webp";
-  }
+  try {
+    const raw = window.localStorage.getItem(EXPORT_DIRECTORY_KEY);
 
-  if (extension === "svg") {
-    return "image/svg+xml";
-  }
+    if (!raw) {
+      return { directory: null };
+    }
 
-  return "image/png";
+    const parsed = JSON.parse(raw) as Partial<ExportPreferences>;
+
+    return {
+      directory:
+        typeof parsed.directory === "string" && parsed.directory.length > 0
+          ? parsed.directory
+          : null,
+    };
+  } catch {
+    return { directory: null };
+  }
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunkSize = 0x8000;
-
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+function storeExportPreferences(preferences: ExportPreferences): void {
+  if (typeof window === "undefined") {
+    return;
   }
 
-  if (typeof globalThis.btoa === "function") {
-    return globalThis.btoa(binary);
+  try {
+    if (preferences.directory) {
+      window.localStorage.setItem(
+        EXPORT_DIRECTORY_KEY,
+        JSON.stringify(preferences),
+      );
+    } else {
+      window.localStorage.removeItem(EXPORT_DIRECTORY_KEY);
+    }
+  } catch {
+    // Ignore storage failures in constrained browsers.
+  }
+}
+
+function sanitizeExportFileStem(value: string): string {
+  const normalized = Array.from(value.normalize("NFKC"), (character) =>
+    character.charCodeAt(0) < 32 ? "_" : character,
+  ).join("");
+  const sanitized = normalized
+    .replace(/[<>:"/\\|?*]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "");
+
+  return sanitized.length > 0 ? sanitized : "taste-ledger-export";
+}
+
+function canRasterizeSvgForExport(): boolean {
+  if (
+    typeof window === "undefined" ||
+    typeof document === "undefined" ||
+    typeof Image === "undefined"
+  ) {
+    return false;
   }
 
-  return Buffer.from(bytes).toString("base64");
+  const canvas = document.createElement("canvas");
+  return canvas.getContext("2d") !== null;
+}
+
+function canCopyImageToClipboard(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    typeof navigator.clipboard?.write === "function" &&
+    typeof ClipboardItem !== "undefined"
+  );
+}
+
+function downloadFile(
+  bytes: Uint8Array,
+  fileName: string,
+  mimeType: string,
+): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  if (typeof URL.createObjectURL !== "function") {
+    return;
+  }
+
+  const blobBytes = new Uint8Array(bytes.byteLength);
+  blobBytes.set(bytes);
+  const blob = new Blob([blobBytes.buffer], { type: mimeType });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  anchor.rel = "noreferrer";
+  anchor.style.display = "none";
+
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
 function LoadingShell({ label }: { label: string }) {

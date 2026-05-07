@@ -2,6 +2,18 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("rankingDesktop", {
   platform: "electron",
+  chooseDirectory() {
+    return ipcRenderer.invoke("ranking-shell:choose-directory");
+  },
+  writeFile(options) {
+    return ipcRenderer.invoke("ranking-shell:write-file", {
+      ...options,
+      bytes: Array.from(options.bytes),
+    });
+  },
+  copyImage(bytes) {
+    return ipcRenderer.invoke("ranking-shell:copy-image", Array.from(bytes));
+  },
 });
 
 contextBridge.exposeInMainWorld("rankingNative", {

@@ -7,7 +7,7 @@ describe("app shell", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "本地个人评分工具" }),
+      await screen.findByRole("heading", { name: "Taste Ledger" }),
     ).toBeInTheDocument();
   });
 });

@@ -76,7 +76,7 @@ function shareLibrary(): Library {
       {
         id: "ranking-film",
         categoryId: "cat-film",
-        name: "从夯到拉",
+        name: "作品排行",
         mode: "finalScore",
         dimensionId: null,
         workIds: ["work-b", "work-a"],
@@ -150,7 +150,7 @@ describe("work share export", () => {
     expect(payload).toMatchObject({
       variant: "long",
       rankingId: "ranking-film",
-      rankingName: "从夯到拉",
+      rankingName: "作品排行",
       categoryName: "影视作品",
       sortLabel: "按最终评分",
     });
@@ -170,9 +170,10 @@ describe("work share export", () => {
       buildRankingSharePayload(library, ranking.id, orderedWorks),
     );
 
-    expect(svg).toContain("从夯到拉");
+    expect(svg).toContain("作品排行");
     expect(svg.indexOf("作品 B")).toBeLessThan(svg.indexOf("作品 A"));
     expect(svg).toContain("按最终评分");
+    expect(svg).toContain("作品顺位");
     expect(svg).toContain("10 分");
   });
 
@@ -208,7 +209,7 @@ describe("work share export", () => {
         {
           id: "tier-film",
           categoryId: "cat-film",
-          name: "五档分级",
+          name: "五级分级",
           levels: [
             {
               id: "tier-1",
@@ -250,7 +251,7 @@ describe("work share export", () => {
     const svg = renderTierListShareSvg(payload);
     const image = createTierListShareImage(library, "tier-film", coverImages);
 
-    expect(payload.tierListName).toBe("五档分级");
+    expect(payload.tierListName).toBe("五级分级");
     expect(payload.levels[0].items[0]).toMatchObject({
       title: "作品 A",
       coverDataUrl: "data:image/png;base64,AAAA",
