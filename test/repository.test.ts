@@ -51,6 +51,124 @@ function sampleLibrary(): Library {
   };
 }
 
+function multiRootLibrary(): Library {
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    categories: [
+      {
+        id: "cat-film",
+        parentCategoryId: null,
+        name: "影视作品",
+        createdAt: now,
+        updatedAt: now,
+        ratingDimensionTemplates: [],
+      },
+      {
+        id: "cat-film-2026-01",
+        parentCategoryId: "cat-film",
+        name: "2026年1月新番",
+        createdAt: now,
+        updatedAt: now,
+        ratingDimensionTemplates: [],
+      },
+      {
+        id: "cat-music",
+        parentCategoryId: null,
+        name: "音乐",
+        createdAt: now,
+        updatedAt: now,
+        ratingDimensionTemplates: [],
+      },
+    ],
+    works: [
+      {
+        id: "work-a",
+        categoryId: "cat-film",
+        title: "作品 A",
+        coverImagePath: "images/work-a.png",
+        tags: [],
+        shortReview: "",
+        longReview: "",
+        ratingDimensions: [],
+        finalScore: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "work-b",
+        categoryId: "cat-film-2026-01",
+        title: "作品 B",
+        coverImagePath: null,
+        tags: [],
+        shortReview: "",
+        longReview: "",
+        ratingDimensions: [],
+        finalScore: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "work-c",
+        categoryId: "cat-music",
+        title: "作品 C",
+        coverImagePath: null,
+        tags: [],
+        shortReview: "",
+        longReview: "",
+        ratingDimensions: [],
+        finalScore: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    rankings: [
+      {
+        id: "rank-film",
+        categoryId: "cat-film",
+        name: "作品排行",
+        mode: "finalScore",
+        dimensionId: null,
+        workIds: ["work-a", "work-b"],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "rank-music",
+        categoryId: "cat-music",
+        name: "音乐排行",
+        mode: "finalScore",
+        dimensionId: null,
+        workIds: ["work-c"],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    tierLists: [
+      {
+        id: "tier-film",
+        categoryId: "cat-film",
+        name: "五级分级",
+        levels: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "tier-music",
+        categoryId: "cat-music",
+        name: "音乐分级",
+        levels: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    exportSettings: {
+      workCoverTemplate: "default",
+      workLongTemplate: "default",
+      rankingTemplate: "default",
+    },
+  };
+}
+
 describe("library repository", () => {
   it("creates missing directories and persists the library atomically", async () => {
     const root = await mkdtemp(join(tmpdir(), "ranking-repo-"));
@@ -60,12 +178,103 @@ describe("library repository", () => {
     await repository.ensureStructure();
     await repository.save(sampleLibrary());
 
-    const libraryPath = join(root, "library.json");
-    const content = await readFile(libraryPath, "utf8");
+    const manifestPath = join(root, "library-manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const categoryPath = join(root, "categories", "cat-film.json");
+    const categoryShard = JSON.parse(await readFile(categoryPath, "utf8"));
 
-    expect(JSON.parse(content)).toMatchObject(sampleLibrary());
+    expect(manifest).toMatchObject({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      rootCategoryIds: ["cat-film"],
+      exportSettings: sampleLibrary().exportSettings,
+    });
+    expect(categoryShard).toMatchObject({
+      category: sampleLibrary().categories[0],
+      childCategories: [],
+      works: sampleLibrary().works,
+      rankings: [],
+      tierLists: [],
+    });
+    await expect(access(join(root, "categories"))).resolves.toBeUndefined();
     await expect(access(join(root, "images"))).resolves.toBeUndefined();
     await expect(access(join(root, "exports"))).resolves.toBeUndefined();
+  });
+
+  it("stores one shard per root category and keeps shared child content in the parent shard", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ranking-repo-"));
+    const backend = createNodeFileBackend({ rootDir: root });
+    const repository = createLibraryRepository(backend);
+
+    await repository.save(multiRootLibrary());
+
+    const manifest = JSON.parse(
+      await readFile(join(root, "library-manifest.json"), "utf8"),
+    );
+    const filmShard = JSON.parse(
+      await readFile(join(root, "categories", "cat-film.json"), "utf8"),
+    );
+    const musicShard = JSON.parse(
+      await readFile(join(root, "categories", "cat-music.json"), "utf8"),
+    );
+
+    expect(manifest.rootCategoryIds).toEqual(["cat-film", "cat-music"]);
+    expect(filmShard).toMatchObject({
+      category: {
+        id: "cat-film",
+      },
+      childCategories: [
+        {
+          id: "cat-film-2026-01",
+          parentCategoryId: "cat-film",
+        },
+      ],
+      works: [
+        {
+          id: "work-a",
+          categoryId: "cat-film",
+        },
+        {
+          id: "work-b",
+          categoryId: "cat-film-2026-01",
+        },
+      ],
+      rankings: [
+        {
+          id: "rank-film",
+          categoryId: "cat-film",
+        },
+      ],
+      tierLists: [
+        {
+          id: "tier-film",
+          categoryId: "cat-film",
+        },
+      ],
+    });
+    expect(musicShard).toMatchObject({
+      category: {
+        id: "cat-music",
+      },
+      childCategories: [],
+      works: [
+        {
+          id: "work-c",
+          categoryId: "cat-music",
+        },
+      ],
+      rankings: [
+        {
+          id: "rank-music",
+          categoryId: "cat-music",
+        },
+      ],
+      tierLists: [
+        {
+          id: "tier-music",
+          categoryId: "cat-music",
+        },
+      ],
+    });
   });
 
   it("loads a previously saved library", async () => {
@@ -95,14 +304,12 @@ describe("library repository", () => {
     const root = await mkdtemp(join(tmpdir(), "ranking-repo-"));
     const backend = createNodeFileBackend({ rootDir: root });
     const repository = createLibraryRepository(backend);
-    const libraryPath = join(root, "library.json");
+    const manifestPath = join(root, "library-manifest.json");
 
-    await writeFile(libraryPath, "{broken json", "utf8");
+    await writeFile(manifestPath, "{broken json", "utf8");
 
-    await expect(repository.load()).rejects.toThrow(
-      "Invalid JSON in library file.",
-    );
-    await expect(readFile(libraryPath, "utf8")).resolves.toBe("{broken json");
+    await expect(repository.load()).rejects.toThrow("Invalid JSON file.");
+    await expect(readFile(manifestPath, "utf8")).resolves.toBe("{broken json");
   });
 
   it("stores image bytes under the images directory", async () => {

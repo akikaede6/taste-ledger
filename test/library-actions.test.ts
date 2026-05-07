@@ -345,6 +345,29 @@ describe("category actions", () => {
     expect(createdTierList.tierList.categoryId).toBe(rootCategory.id);
   });
 
+  it("rejects creating a subcategory under another subcategory", () => {
+    let library = createCategory(createEmptyLibrary(), { name: "动画" });
+    const rootCategory = library.categories[0];
+    library = createCategory(library, {
+      name: "2026年1月新番",
+      parentCategoryId: rootCategory.id,
+    });
+    const childCategory = library.categories.find(
+      (category) => category.parentCategoryId === rootCategory.id,
+    );
+
+    if (!childCategory) {
+      throw new Error("Expected child category.");
+    }
+
+    expect(() =>
+      createCategory(library, {
+        name: "第 1 周",
+        parentCategoryId: childCategory.id,
+      }),
+    ).toThrow("Subcategories may only be created under root categories.");
+  });
+
   it("removes child category works from shared tier lists", () => {
     vi.setSystemTime(new Date(rankingNow));
 

@@ -82,6 +82,16 @@ export function createCategory(
     throw new Error("Parent category not found.");
   }
 
+  if (parentCategoryId) {
+    const parentCategory = findCategory(next, parentCategoryId);
+
+    if (parentCategory && parentCategory.parentCategoryId !== null) {
+      throw new Error(
+        "Subcategories may only be created under root categories.",
+      );
+    }
+  }
+
   next.categories.push({
     id: crypto.randomUUID(),
     parentCategoryId,

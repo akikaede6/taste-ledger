@@ -506,16 +506,22 @@ function validateRelations(library: Library, issues: ValidationIssue[]) {
       issues,
     );
 
-    if (
-      category.parentCategoryId !== null &&
-      category.parentCategoryId !== undefined &&
-      !categoryIds.has(category.parentCategoryId)
-    ) {
-      issues.push({
-        path: `$.categories[${categoryIndex}].parentCategoryId`,
-        message: "Category references a missing parent category.",
-        severity: "error",
-      });
+    if (category.parentCategoryId !== null) {
+      const parentCategory = categoryById.get(category.parentCategoryId);
+
+      if (!parentCategory) {
+        issues.push({
+          path: `$.categories[${categoryIndex}].parentCategoryId`,
+          message: "Category references a missing parent category.",
+          severity: "error",
+        });
+      } else if (parentCategory.parentCategoryId !== null) {
+        issues.push({
+          path: `$.categories[${categoryIndex}].parentCategoryId`,
+          message: "Subcategories may only be one level deep.",
+          severity: "error",
+        });
+      }
     }
 
     if (

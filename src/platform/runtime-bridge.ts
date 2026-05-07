@@ -1,6 +1,8 @@
 export interface DesktopBridge {
   platform: "electron";
   chooseDirectory(): Promise<string | null>;
+  chooseStorageDirectory(): Promise<string | null>;
+  getStorageDirectory(): Promise<string>;
   writeFile(options: {
     directory: string;
     fileName: string;
@@ -11,7 +13,7 @@ export interface DesktopBridge {
 
 declare global {
   interface Window {
-    rankingDesktop?: DesktopBridge;
+    tasteLedgerDesktop?: DesktopBridge;
   }
 }
 
@@ -20,5 +22,5 @@ export function getDesktopBridge(): DesktopBridge | null {
     return null;
   }
 
-  return window.rankingDesktop ?? null;
+  return window.tasteLedgerDesktop ?? null;
 }

@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildTierListSharePayload,
+  buildTierListPreviewSharePayload,
   buildWorkSharePayload,
+  buildRankingPreviewSharePayload,
   buildRankingSharePayload,
+  createRankingPreviewShareImage,
   createTierListShareImage,
+  createTierListPreviewShareImage,
   createWorkShareImage,
   renderRankingShareSvg,
   renderTierListShareSvg,
@@ -119,6 +123,16 @@ describe("work share export", () => {
     });
   });
 
+  it("renders work exports without a visible title line", () => {
+    const svg = renderWorkShareSvg(
+      buildWorkSharePayload(shareLibrary(), "work-a", "cover"),
+    );
+
+    expect(svg).toContain('aria-label="作品 A"');
+    expect(svg).not.toContain(">作品 A</text>");
+    expect(svg).not.toContain('font-size="58"');
+  });
+
   it("renders long review content only for long exports", () => {
     const coverSvg = renderWorkShareSvg(
       buildWorkSharePayload(shareLibrary(), "work-a", "cover"),
@@ -163,6 +177,91 @@ describe("work share export", () => {
     ]);
     expect(payload.items[0]?.scoreLabel).toBe("10 分");
     expect(payload.items[1]?.scoreLabel).toBe("8.67 分");
+  });
+
+  it("builds a preview ranking payload without a saved ranking record", () => {
+    const payload = buildRankingPreviewSharePayload({
+      categoryName: "影视作品",
+      rankingName: "作品排行",
+      mode: "dimension",
+      dimensionId: "story",
+      dimensionName: "剧情",
+      orderedWorks: shareLibrary().works,
+    });
+    const image = createRankingPreviewShareImage({
+      categoryName: "影视作品",
+      rankingName: "作品排行",
+      mode: "dimension",
+      dimensionId: "story",
+      dimensionName: "剧情",
+      orderedWorks: shareLibrary().works,
+    });
+
+    expect(payload.rankingId).toMatch(/^preview-\d+$/);
+    expect(payload.sortLabel).toBe("按剧情");
+    expect(payload.items.map((item) => item.scoreLabel)).toEqual([
+      "9 分",
+      "10 分",
+    ]);
+    expect(image.id).toMatch(/^preview-\d+-long-\d+$/);
+    expect(image.extension).toBe("svg");
+  });
+
+  it("builds a tier list preview payload from edited level names", () => {
+    const works = shareLibrary().works.map((work) =>
+      work.id === "work-a"
+        ? {
+            ...work,
+            coverImagePath: "images/work-a.png",
+          }
+        : work,
+    );
+    const levels = [
+      {
+        id: "tier-1" as const,
+        name: "神作",
+        workIds: ["work-a"],
+      },
+      {
+        id: "tier-2" as const,
+        name: "不错",
+        workIds: ["work-b"],
+      },
+      {
+        id: "tier-3" as const,
+        name: "一般",
+        workIds: [],
+      },
+      {
+        id: "tier-4" as const,
+        name: "较差",
+        workIds: [],
+      },
+      {
+        id: "tier-5" as const,
+        name: "很差",
+        workIds: [],
+      },
+    ];
+    const input = {
+      tierListId: "tier-film",
+      tierListName: "自定义分级",
+      categoryName: "影视作品",
+      levels,
+      works,
+      coverImages: new Map([["work-a", "data:image/png;base64,AAAA"]]),
+    };
+    const payload = buildTierListPreviewSharePayload(input);
+    const image = createTierListPreviewShareImage(input);
+
+    expect(payload.tierListName).toBe("自定义分级");
+    expect(payload.levels[0]?.name).toBe("神作");
+    expect(payload.levels[0]?.items[0]).toMatchObject({
+      title: "作品 A",
+      coverDataUrl: "data:image/png;base64,AAAA",
+    });
+    expect(image.id).toMatch(/^tier-film-tier-\d+$/);
+    expect(image.extension).toBe("svg");
   });
 
   it("renders a long ranking export with the same order as the payload", () => {

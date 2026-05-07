@@ -9,8 +9,8 @@ beforeEach(() => {
 
   clearStorage(window.localStorage);
   clearStorage(window.sessionStorage);
-  delete (window as typeof window & { __rankingMemoryBackend?: unknown })
-    .__rankingMemoryBackend;
+  delete (window as typeof window & { __tasteLedgerMemoryBackend?: unknown })
+    .__tasteLedgerMemoryBackend;
 });
 
 afterEach(() => {

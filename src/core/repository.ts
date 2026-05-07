@@ -1,7 +1,13 @@
 import {
   createEmptyLibrary,
+  type Category,
+  CURRENT_SCHEMA_VERSION,
+  type ExportSettings,
   type Library,
+  type Ranking,
+  type TierList,
   type ValidationIssue,
+  type Work,
 } from "./model";
 import { assertValidLibrary } from "./schema";
 
@@ -45,12 +51,14 @@ export interface LibraryRepository {
 }
 
 export interface LibraryRepositoryOptions {
-  libraryPath?: string;
+  manifestPath?: string;
+  categoriesDir?: string;
   imagesDir?: string;
   exportsDir?: string;
 }
 
-const DEFAULT_LIBRARY_PATH = "library.json";
+const DEFAULT_MANIFEST_PATH = "library-manifest.json";
+const DEFAULT_CATEGORIES_DIR = "categories";
 const DEFAULT_IMAGES_DIR = "images";
 const DEFAULT_EXPORTS_DIR = "exports";
 
@@ -58,15 +66,16 @@ export function createLibraryRepository(
   backend: JsonFileBackend,
   options: LibraryRepositoryOptions = {},
 ): LibraryRepository {
-  const libraryPath = options.libraryPath ?? DEFAULT_LIBRARY_PATH;
+  const manifestPath = options.manifestPath ?? DEFAULT_MANIFEST_PATH;
+  const categoriesDir = options.categoriesDir ?? DEFAULT_CATEGORIES_DIR;
   const imagesDir = options.imagesDir ?? DEFAULT_IMAGES_DIR;
   const exportsDir = options.exportsDir ?? DEFAULT_EXPORTS_DIR;
 
   return {
     async load() {
-      const raw = await backend.readText(libraryPath);
+      const rawManifest = await backend.readText(manifestPath);
 
-      if (raw === null) {
+      if (rawManifest === null) {
         return {
           status: "missing",
           library: createEmptyLibrary(),
@@ -74,18 +83,37 @@ export function createLibraryRepository(
         };
       }
 
-      let parsedUnknown: unknown;
+      const manifest = readLibraryManifest(rawManifest, manifestPath);
+      const categories: Category[] = [];
+      const works: Work[] = [];
+      const rankings: Ranking[] = [];
+      const tierLists: TierList[] = [];
 
-      try {
-        parsedUnknown = JSON.parse(raw);
-      } catch (error) {
-        throw new LibraryRepositoryError("Invalid JSON in library file.", {
-          cause: error,
-          path: libraryPath,
-        });
+      for (const rootCategoryId of manifest.rootCategoryIds) {
+        const shardPath = getCategoryShardPath(categoriesDir, rootCategoryId);
+        const rawShard = await backend.readText(shardPath);
+
+        if (rawShard === null) {
+          throw new LibraryRepositoryError("Missing category shard file.", {
+            path: shardPath,
+          });
+        }
+
+        const shard = readCategoryShard(rawShard, shardPath);
+        categories.push(shard.category, ...shard.childCategories);
+        works.push(...shard.works);
+        rankings.push(...shard.rankings);
+        tierLists.push(...shard.tierLists);
       }
 
-      const library = assertValidLibrary(parsedUnknown);
+      const library = assertValidLibrary({
+        schemaVersion: manifest.schemaVersion,
+        categories,
+        works,
+        rankings,
+        tierLists,
+        exportSettings: manifest.exportSettings,
+      });
 
       return {
         status: "loaded",
@@ -96,14 +124,54 @@ export function createLibraryRepository(
 
     async save(library) {
       const validated = assertValidLibrary(library);
-      const content = `${JSON.stringify(validated, null, 2)}\n`;
+      const rootCategories = validated.categories.filter(
+        (category) => category.parentCategoryId === null,
+      );
+      const rootCategoryIds = rootCategories.map((category) => category.id);
+      const previousManifest = await readLibraryManifestIfExists(
+        backend,
+        manifestPath,
+      );
+      const previousRootCategoryIds = new Set(
+        previousManifest?.rootCategoryIds ?? [],
+      );
 
+      await backend.ensureDirectory(categoriesDir);
       await backend.ensureDirectory(imagesDir);
       await backend.ensureDirectory(exportsDir);
-      await backend.writeTextAtomic(libraryPath, content);
+
+      for (const rootCategory of rootCategories) {
+        const shardPath = getCategoryShardPath(categoriesDir, rootCategory.id);
+        const shard = buildCategoryShard(validated, rootCategory.id);
+        await backend.writeTextAtomic(
+          shardPath,
+          `${JSON.stringify(shard, null, 2)}\n`,
+        );
+        previousRootCategoryIds.delete(rootCategory.id);
+      }
+
+      for (const removedRootCategoryId of previousRootCategoryIds) {
+        await backend.deletePath(
+          getCategoryShardPath(categoriesDir, removedRootCategoryId),
+        );
+      }
+
+      await backend.writeTextAtomic(
+        manifestPath,
+        `${JSON.stringify(
+          {
+            schemaVersion: validated.schemaVersion,
+            exportSettings: validated.exportSettings,
+            rootCategoryIds,
+          },
+          null,
+          2,
+        )}\n`,
+      );
     },
 
     async ensureStructure() {
+      await backend.ensureDirectory(categoriesDir);
       await backend.ensureDirectory(imagesDir);
       await backend.ensureDirectory(exportsDir);
     },
@@ -179,4 +247,242 @@ export function sanitizePathSegment(segment: string): string {
 export function sanitizeExtension(extension: string): string {
   const value = extension.replace(/^\./, "").toLowerCase();
   return value.length > 0 ? value : "png";
+}
+
+interface LibraryManifest {
+  schemaVersion: number;
+  exportSettings: ExportSettings;
+  rootCategoryIds: string[];
+}
+
+interface CategoryShard {
+  category: Category;
+  childCategories: Category[];
+  works: Work[];
+  rankings: Ranking[];
+  tierLists: TierList[];
+}
+
+function readLibraryManifest(raw: string, path: string): LibraryManifest {
+  const record = readJsonRecord(raw, path);
+  const schemaVersion = readRequiredNumberField(
+    record,
+    "schemaVersion",
+    `${path}.schemaVersion`,
+  );
+
+  if (schemaVersion !== CURRENT_SCHEMA_VERSION) {
+    throw new LibraryRepositoryError("Unsupported manifest version.", {
+      path: `${path}.schemaVersion`,
+    });
+  }
+
+  const exportSettingsRecord = readRequiredRecordField(
+    record,
+    "exportSettings",
+    `${path}.exportSettings`,
+  );
+  const rootCategoryIds = readRequiredStringArrayField(
+    record,
+    "rootCategoryIds",
+    `${path}.rootCategoryIds`,
+  );
+
+  return {
+    schemaVersion,
+    exportSettings: {
+      workCoverTemplate: readDefaultTemplateName(
+        exportSettingsRecord,
+        "workCoverTemplate",
+        `${path}.exportSettings.workCoverTemplate`,
+      ),
+      workLongTemplate: readDefaultTemplateName(
+        exportSettingsRecord,
+        "workLongTemplate",
+        `${path}.exportSettings.workLongTemplate`,
+      ),
+      rankingTemplate: readDefaultTemplateName(
+        exportSettingsRecord,
+        "rankingTemplate",
+        `${path}.exportSettings.rankingTemplate`,
+      ),
+    },
+    rootCategoryIds,
+  };
+}
+
+async function readLibraryManifestIfExists(
+  backend: JsonFileBackend,
+  path: string,
+): Promise<LibraryManifest | null> {
+  const raw = await backend.readText(path);
+  return raw === null ? null : readLibraryManifest(raw, path);
+}
+
+function readCategoryShard(raw: string, path: string): CategoryShard {
+  const record = readJsonRecord(raw, path);
+  const category = readRequiredRecordField(
+    record,
+    "category",
+    `${path}.category`,
+  );
+  const childCategories = readRequiredRecordArrayField(
+    record,
+    "childCategories",
+    `${path}.childCategories`,
+  ) as Category[];
+  const works = readRequiredRecordArrayField(
+    record,
+    "works",
+    `${path}.works`,
+  ) as Work[];
+  const rankings = readRequiredRecordArrayField(
+    record,
+    "rankings",
+    `${path}.rankings`,
+  ) as Ranking[];
+  const tierLists = readRequiredRecordArrayField(
+    record,
+    "tierLists",
+    `${path}.tierLists`,
+  ) as TierList[];
+
+  return {
+    category: category as unknown as Category,
+    childCategories,
+    works,
+    rankings,
+    tierLists,
+  };
+}
+
+function buildCategoryShard(
+  library: Library,
+  rootCategoryId: string,
+): CategoryShard {
+  const rootCategory = library.categories.find(
+    (category) => category.id === rootCategoryId,
+  );
+
+  if (!rootCategory) {
+    throw new Error("Root category not found.");
+  }
+
+  const childCategories = library.categories.filter(
+    (category) => category.parentCategoryId === rootCategory.id,
+  );
+  const categoryIds = new Set([
+    rootCategory.id,
+    ...childCategories.map((category) => category.id),
+  ]);
+
+  return {
+    category: rootCategory,
+    childCategories,
+    works: library.works.filter((work) => categoryIds.has(work.categoryId)),
+    rankings: library.rankings.filter(
+      (ranking) => ranking.categoryId === rootCategory.id,
+    ),
+    tierLists: library.tierLists.filter(
+      (tierList) => tierList.categoryId === rootCategory.id,
+    ),
+  };
+}
+
+function getCategoryShardPath(
+  categoriesDir: string,
+  categoryId: string,
+): string {
+  return joinDataPath(categoriesDir, `${sanitizePathSegment(categoryId)}.json`);
+}
+
+function readJsonRecord(raw: string, path: string): Record<string, unknown> {
+  let parsedUnknown: unknown;
+
+  try {
+    parsedUnknown = JSON.parse(raw);
+  } catch (error) {
+    throw new LibraryRepositoryError("Invalid JSON file.", {
+      cause: error,
+      path,
+    });
+  }
+
+  if (
+    typeof parsedUnknown === "object" &&
+    parsedUnknown !== null &&
+    !Array.isArray(parsedUnknown)
+  ) {
+    return parsedUnknown as Record<string, unknown>;
+  }
+
+  throw new LibraryRepositoryError("Expected an object.", { path });
+}
+
+function readRequiredRecordField(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): Record<string, unknown> {
+  const value = record[key];
+
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  throw new LibraryRepositoryError("Expected an object.", { path });
+}
+
+function readRequiredRecordArrayField(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): unknown[] {
+  const value = record[key];
+
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  throw new LibraryRepositoryError("Expected an array.", { path });
+}
+
+function readRequiredStringArrayField(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): string[] {
+  const value = readRequiredRecordArrayField(record, key, path);
+
+  if (value.every((item) => typeof item === "string")) {
+    return value as string[];
+  }
+
+  throw new LibraryRepositoryError("Expected an array of strings.", { path });
+}
+
+function readRequiredNumberField(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): number {
+  const value = record[key];
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  throw new LibraryRepositoryError("Expected a number.", { path });
+}
+
+function readDefaultTemplateName(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): "default" {
+  if (record[key] === "default") {
+    return "default";
+  }
+
+  throw new LibraryRepositoryError("Expected default.", { path });
 }

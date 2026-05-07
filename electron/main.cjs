@@ -15,10 +15,9 @@ const isDev = process.env.VITE_DEV_SERVER_URL;
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu");
 
-const dataRoot = () =>
-  path.join(app.getPath("documents"), "Ranking", "ranking-data");
+let currentDataRoot = null;
 
-ipcMain.handle("ranking-shell:choose-directory", async () => {
+ipcMain.handle("taste-ledger-shell:choose-directory", async () => {
   const result = await dialog.showOpenDialog({
     properties: ["openDirectory", "createDirectory"],
   });
@@ -26,8 +25,36 @@ ipcMain.handle("ranking-shell:choose-directory", async () => {
   return result.canceled ? null : (result.filePaths[0] ?? null);
 });
 
+ipcMain.handle("taste-ledger-shell:get-storage-directory", async () => {
+  return getDataRoot();
+});
+
+ipcMain.handle("taste-ledger-shell:choose-storage-directory", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openDirectory", "createDirectory"],
+  });
+
+  if (result.canceled) {
+    return null;
+  }
+
+  const selectedRoot = result.filePaths[0]
+    ? path.resolve(result.filePaths[0])
+    : null;
+
+  if (!selectedRoot) {
+    return null;
+  }
+
+  currentDataRoot = selectedRoot;
+  await fs.mkdir(currentDataRoot, { recursive: true });
+  await writeStorageConfig(currentDataRoot);
+
+  return currentDataRoot;
+});
+
 ipcMain.handle(
-  "ranking-shell:write-file",
+  "taste-ledger-shell:write-file",
   async (_event, { directory, fileName, bytes }) => {
     const targetPath = path.join(directory, sanitizeFileName(fileName));
 
@@ -38,51 +65,57 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle("ranking-shell:copy-image", async (_event, bytes) => {
+ipcMain.handle("taste-ledger-shell:copy-image", async (_event, bytes) => {
   clipboard.writeImage(nativeImage.createFromBuffer(Buffer.from(bytes)));
 });
 
 ipcMain.handle(
-  "ranking-storage:ensure-directory",
+  "taste-ledger-storage:ensure-directory",
   async (_event, relativePath) => {
     await fs.mkdir(resolveDataPath(relativePath), { recursive: true });
   },
 );
 
-ipcMain.handle("ranking-storage:read-text", async (_event, relativePath) => {
-  try {
-    return await fs.readFile(resolveDataPath(relativePath), "utf8");
-  } catch (error) {
-    if (isNodeErrorWithCode(error, "ENOENT")) {
-      return null;
-    }
+ipcMain.handle(
+  "taste-ledger-storage:read-text",
+  async (_event, relativePath) => {
+    try {
+      return await fs.readFile(resolveDataPath(relativePath), "utf8");
+    } catch (error) {
+      if (isNodeErrorWithCode(error, "ENOENT")) {
+        return null;
+      }
 
-    throw error;
-  }
-});
+      throw error;
+    }
+  },
+);
 
 ipcMain.handle(
-  "ranking-storage:write-text-atomic",
+  "taste-ledger-storage:write-text-atomic",
   async (_event, relativePath, content) => {
     await writeAtomicText(resolveDataPath(relativePath), content);
   },
 );
 
-ipcMain.handle("ranking-storage:read-bytes", async (_event, relativePath) => {
-  try {
-    const bytes = await fs.readFile(resolveDataPath(relativePath));
-    return Array.from(bytes);
-  } catch (error) {
-    if (isNodeErrorWithCode(error, "ENOENT")) {
-      return null;
-    }
+ipcMain.handle(
+  "taste-ledger-storage:read-bytes",
+  async (_event, relativePath) => {
+    try {
+      const bytes = await fs.readFile(resolveDataPath(relativePath));
+      return Array.from(bytes);
+    } catch (error) {
+      if (isNodeErrorWithCode(error, "ENOENT")) {
+        return null;
+      }
 
-    throw error;
-  }
-});
+      throw error;
+    }
+  },
+);
 
 ipcMain.handle(
-  "ranking-storage:write-bytes-atomic",
+  "taste-ledger-storage:write-bytes-atomic",
   async (_event, relativePath, content) => {
     await writeAtomicBytes(
       resolveDataPath(relativePath),
@@ -91,19 +124,22 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle("ranking-storage:delete-path", async (_event, relativePath) => {
-  const resolvedPath = resolveDataPath(relativePath);
+ipcMain.handle(
+  "taste-ledger-storage:delete-path",
+  async (_event, relativePath) => {
+    const resolvedPath = resolveDataPath(relativePath);
 
-  try {
-    await fs.rm(resolvedPath, { force: true, recursive: true });
-  } catch (error) {
-    if (!isNodeErrorWithCode(error, "ENOENT")) {
-      throw error;
+    try {
+      await fs.rm(resolvedPath, { force: true, recursive: true });
+    } catch (error) {
+      if (!isNodeErrorWithCode(error, "ENOENT")) {
+        throw error;
+      }
     }
-  }
-});
+  },
+);
 
-ipcMain.handle("ranking-storage:exists", async (_event, relativePath) => {
+ipcMain.handle("taste-ledger-storage:exists", async (_event, relativePath) => {
   try {
     await fs.access(resolveDataPath(relativePath));
     return true;
@@ -133,7 +169,8 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await initializeDataRoot();
   createWindow();
 
   app.on("activate", () => {
@@ -150,7 +187,7 @@ app.on("window-all-closed", () => {
 });
 
 function resolveDataPath(relativePath) {
-  const root = dataRoot();
+  const root = getDataRoot();
   const resolved = path.resolve(root, relativePath);
 
   if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
@@ -158,6 +195,63 @@ function resolveDataPath(relativePath) {
   }
 
   return resolved;
+}
+
+async function initializeDataRoot() {
+  currentDataRoot = await readStorageConfig();
+  await fs.mkdir(currentDataRoot, { recursive: true });
+}
+
+function getDataRoot() {
+  if (!currentDataRoot) {
+    currentDataRoot = getDefaultDataRoot();
+  }
+
+  return currentDataRoot;
+}
+
+function getDefaultDataRoot() {
+  return path.join(
+    app.getPath("documents"),
+    "Taste Ledger",
+    "taste-ledger-data",
+  );
+}
+
+function getStorageConfigPath() {
+  return path.join(app.getPath("userData"), "taste-ledger-storage.json");
+}
+
+async function readStorageConfig() {
+  try {
+    const raw = await fs.readFile(getStorageConfigPath(), "utf8");
+    const parsed = JSON.parse(raw);
+
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.dataRoot === "string" &&
+      parsed.dataRoot.trim().length > 0
+    ) {
+      return path.resolve(parsed.dataRoot);
+    }
+  } catch (error) {
+    if (!isNodeErrorWithCode(error, "ENOENT")) {
+      return getDefaultDataRoot();
+    }
+  }
+
+  return getDefaultDataRoot();
+}
+
+async function writeStorageConfig(dataRoot) {
+  const configPath = getStorageConfigPath();
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(
+    configPath,
+    `${JSON.stringify({ dataRoot }, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 async function writeAtomicText(targetPath, content) {

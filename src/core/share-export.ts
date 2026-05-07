@@ -1,9 +1,11 @@
-import type {
-  Library,
-  Ranking,
-  RatingDimensionScore,
-  TierLevelId,
-  Work,
+import {
+  DEFAULT_TIER_LEVELS,
+  type Library,
+  type RankingMode,
+  type RatingDimensionScore,
+  type TierLevel,
+  type TierLevelId,
+  type Work,
 } from "./model";
 import { getCategoryAncestorIds } from "./category-tree";
 
@@ -42,6 +44,24 @@ export interface RankingSharePayload {
   categoryName: string;
   sortLabel: string;
   items: RankingShareItem[];
+}
+
+export interface RankingPreviewShareInput {
+  categoryName: string;
+  rankingName: string;
+  mode: Exclude<RankingMode, "manual">;
+  dimensionId: string | null;
+  dimensionName: string | null;
+  orderedWorks: Work[];
+}
+
+export interface TierListPreviewShareInput {
+  tierListId: string;
+  tierListName: string;
+  categoryName: string;
+  levels: TierLevel[];
+  works: Work[];
+  coverImages?: Map<string, string>;
 }
 
 export interface TierListShareItem {
@@ -148,18 +168,35 @@ export function buildRankingSharePayload(
     throw new Error("Ranking export includes works from another category.");
   }
 
-  return {
-    variant: "long",
+  return buildRankingSharePayloadFromSource({
     rankingId: ranking.id,
     rankingName: ranking.name,
     categoryName: category.name,
-    sortLabel: getRankingSortLabel(ranking, orderedWorks),
-    items: orderedWorks.map((work, index) => ({
-      rank: index + 1,
-      title: work.title,
-      scoreLabel: getRankingScoreLabel(ranking, work),
-    })),
-  };
+    mode: ranking.mode,
+    dimensionId: ranking.dimensionId,
+    dimensionName: ranking.dimensionId
+      ? getRankingDimensionName(ranking.dimensionId, orderedWorks)
+      : null,
+    orderedWorks,
+  });
+}
+
+export function buildRankingPreviewSharePayload(
+  input: RankingPreviewShareInput,
+): RankingSharePayload {
+  if (input.orderedWorks.length === 0) {
+    throw new Error("Ranking has no works.");
+  }
+
+  return buildRankingSharePayloadFromSource({
+    rankingId: `preview-${Date.now()}`,
+    rankingName: input.rankingName,
+    categoryName: input.categoryName,
+    mode: input.mode,
+    dimensionId: input.dimensionId,
+    dimensionName: input.dimensionName,
+    orderedWorks: input.orderedWorks,
+  });
 }
 
 export function createRankingShareImage(
@@ -171,6 +208,18 @@ export function createRankingShareImage(
 
   return {
     id: `${payload.rankingId}-${payload.variant}-${Date.now()}`,
+    extension: "svg",
+    bytes: new TextEncoder().encode(renderRankingShareSvg(payload)),
+  };
+}
+
+export function createRankingPreviewShareImage(
+  input: RankingPreviewShareInput,
+): ShareImageFile {
+  const payload = buildRankingPreviewSharePayload(input);
+
+  return {
+    id: `${sanitizeFileStem(payload.rankingId)}-${payload.variant}-${Date.now()}`,
     extension: "svg",
     bytes: new TextEncoder().encode(renderRankingShareSvg(payload)),
   };
@@ -233,6 +282,46 @@ export function buildTierListSharePayload(
   };
 }
 
+export function buildTierListPreviewSharePayload(
+  input: TierListPreviewShareInput,
+): TierListSharePayload {
+  const coverImages = input.coverImages ?? new Map<string, string>();
+  const workById = new Map(input.works.map((work) => [work.id, work] as const));
+  const levels = input.levels.map((level) => ({
+    id: level.id,
+    name: normalizeTierLevelName(level),
+    items: level.workIds.flatMap((workId) => {
+      const work = workById.get(workId);
+
+      if (!work) {
+        return [];
+      }
+
+      return [
+        {
+          title: work.title,
+          coverImagePath: work.coverImagePath,
+          coverDataUrl: work.coverImagePath
+            ? (coverImages.get(work.id) ?? null)
+            : null,
+        },
+      ];
+    }),
+  }));
+
+  if (levels.every((level) => level.items.length === 0)) {
+    throw new Error("Tier list has no assigned works.");
+  }
+
+  return {
+    variant: "tier",
+    tierListId: input.tierListId,
+    tierListName: input.tierListName.trim() || "五级分级",
+    categoryName: input.categoryName,
+    levels,
+  };
+}
+
 function isCategoryInScope(
   library: Library,
   scopeCategoryId: string,
@@ -258,6 +347,18 @@ export function createTierListShareImage(
   };
 }
 
+export function createTierListPreviewShareImage(
+  input: TierListPreviewShareInput,
+): ShareImageFile {
+  const payload = buildTierListPreviewSharePayload(input);
+
+  return {
+    id: `${sanitizeFileStem(payload.tierListId)}-${payload.variant}-${Date.now()}`,
+    extension: "svg",
+    bytes: new TextEncoder().encode(renderTierListShareSvg(payload)),
+  };
+}
+
 export function renderWorkShareSvg(payload: WorkSharePayload): string {
   const shortReviewLines = payload.shortReview
     ? wrapText(payload.shortReview, 28)
@@ -271,7 +372,7 @@ export function renderWorkShareSvg(payload: WorkSharePayload): string {
       `${dimension.name}: ${dimension.score} x ${dimension.weight}`,
   );
   const height =
-    980 +
+    926 +
     shortReviewLines.length * 34 +
     dimensionRows.length * 38 +
     longReviewLines.length * 34;
@@ -295,13 +396,6 @@ export function renderWorkShareSvg(payload: WorkSharePayload): string {
   ];
 
   cursor += 76;
-  parts.push(
-    `<text x="${TEXT_LEFT}" y="${cursor}" fill="#111827" font-family="system-ui, sans-serif" font-size="58" font-weight="800">${escapeXml(
-      payload.title,
-    )}</text>`,
-  );
-
-  cursor += 54;
   parts.push(
     `<text x="${TEXT_LEFT}" y="${cursor}" fill="#0f766e" font-family="system-ui, sans-serif" font-size="38" font-weight="800">${escapeXml(
       scoreLabel,
@@ -377,6 +471,36 @@ export function renderWorkShareSvg(payload: WorkSharePayload): string {
   parts.push("</svg>");
 
   return parts.join("");
+}
+
+function buildRankingSharePayloadFromSource(source: {
+  rankingId: string;
+  rankingName: string;
+  categoryName: string;
+  mode: RankingMode;
+  dimensionId: string | null;
+  dimensionName: string | null;
+  orderedWorks: Work[];
+}): RankingSharePayload {
+  const sortLabel =
+    source.mode === "manual"
+      ? "手动排序"
+      : source.mode === "dimension" && source.dimensionName
+        ? `按${source.dimensionName}`
+        : "按最终评分";
+
+  return {
+    variant: "long",
+    rankingId: source.rankingId,
+    rankingName: source.rankingName,
+    categoryName: source.categoryName,
+    sortLabel,
+    items: source.orderedWorks.map((work, index) => ({
+      rank: index + 1,
+      title: work.title,
+      scoreLabel: getRankingScoreLabel(source.mode, source.dimensionId, work),
+    })),
+  };
 }
 
 export function renderRankingShareSvg(payload: RankingSharePayload): string {
@@ -600,6 +724,17 @@ function createTierTitleLines(value: string): string[] {
   return [lines[0], `${lines[1].slice(0, 9)}...`];
 }
 
+function normalizeTierLevelName(level: TierLevel): string {
+  return level.name.trim() || getDefaultTierLevelName(level.id);
+}
+
+function getDefaultTierLevelName(levelId: TierLevelId): string {
+  return (
+    DEFAULT_TIER_LEVELS.find((definition) => definition.id === levelId)?.name ??
+    levelId
+  );
+}
+
 function getTierLabelColor(levelId: TierLevelId): string {
   switch (levelId) {
     case "tier-1":
@@ -613,18 +748,6 @@ function getTierLabelColor(levelId: TierLevelId): string {
     case "tier-5":
       return "#b91c1c";
   }
-}
-
-function getRankingSortLabel(ranking: Ranking, works: Work[]): string {
-  if (ranking.mode === "manual") {
-    return "手动排序";
-  }
-
-  if (ranking.mode === "dimension" && ranking.dimensionId) {
-    return `按${getRankingDimensionName(ranking.dimensionId, works)}`;
-  }
-
-  return "按最终评分";
 }
 
 function getRankingDimensionName(dimensionId: string, works: Work[]): string {
@@ -641,15 +764,32 @@ function getRankingDimensionName(dimensionId: string, works: Work[]): string {
   return `维度 ${dimensionId}`;
 }
 
-function getRankingScoreLabel(ranking: Ranking, work: Work): string {
-  if (ranking.mode === "dimension" && ranking.dimensionId) {
+function getRankingScoreLabel(
+  mode: RankingMode,
+  dimensionId: string | null,
+  work: Work,
+): string {
+  if (mode === "dimension" && dimensionId) {
     const dimension = work.ratingDimensions.find(
-      (item) => item.id === ranking.dimensionId,
+      (item) => item.id === dimensionId,
     );
     return dimension ? `${dimension.score} 分` : "未评分";
   }
 
   return work.finalScore === null ? "未评分" : `${work.finalScore} 分`;
+}
+
+function sanitizeFileStem(value: string): string {
+  const normalized = Array.from(value.normalize("NFKC"), (character) =>
+    character.charCodeAt(0) < 32 ? "_" : character,
+  ).join("");
+  const sanitized = normalized
+    .replace(/[<>:"/\\|?*]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "");
+
+  return sanitized.length > 0 ? sanitized : "taste-ledger-export";
 }
 
 function escapeXml(value: string): string {

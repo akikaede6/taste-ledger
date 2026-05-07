@@ -1,8 +1,4 @@
 import {
-  ChevronDown,
-  ChevronRight,
-  ArrowDown,
-  ArrowUp,
   BookOpen,
   ClipboardCopy,
   Download,
@@ -32,10 +28,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import {
-  sortRankingsByRecentUpdate,
-  sortTierListsByRecentUpdate,
-} from "./core/library-actions";
+import { sortTierListsByRecentUpdate } from "./core/library-actions";
 import {
   getCategoryDescendantIds,
   getCategoryLineage,
@@ -46,17 +39,17 @@ import {
 import { useLibraryState } from "./core/library-store";
 import type {
   Category,
-  Ranking,
   RankingMode,
   RatingDimensionScore,
   RatingDimensionTemplate,
+  TierLevel,
   TierLevelId,
   TierList,
   Work,
 } from "./core/model";
 import {
   collectRankingDimensionOptions,
-  getRankingWorks,
+  sortWorksForRanking,
   type RankingDimensionOption,
 } from "./core/ranking";
 import {
@@ -69,6 +62,10 @@ import type { LibraryRepository } from "./core/repository";
 import { createLibraryRepository } from "./core/repository";
 import { calculateFinalScore } from "./core/scoring";
 import type { ShareImageFile, WorkShareVariant } from "./core/share-export";
+import {
+  createRankingPreviewShareImage,
+  createTierListPreviewShareImage,
+} from "./core/share-export";
 import { createRuntimeBackend } from "./platform/runtime-backend";
 import { getDesktopBridge } from "./platform/runtime-bridge";
 
@@ -80,14 +77,9 @@ interface WorkSaveInput {
   ratingDimensions: RatingDimensionScore[];
 }
 
-interface RankingSaveInput {
-  name: string;
-  mode: RankingMode;
-  dimensionId: string | null;
-}
-
 interface TierListSaveInput {
   name: string;
+  levels: TierLevel[];
 }
 
 interface ExportDialogState {
@@ -102,11 +94,7 @@ interface ExportPreferences {
   directory: string | null;
 }
 
-const RANKING_MODE_LABELS: Record<RankingMode, string> = {
-  finalScore: "最终评分",
-  dimension: "单维度评分",
-  manual: "手动排序",
-};
+type ScoreRankingMode = Exclude<RankingMode, "manual">;
 
 const EXPORT_DIRECTORY_KEY = "taste-ledger:export-directory";
 
@@ -152,15 +140,13 @@ export function App() {
 function Workspace({ repository }: { repository: LibraryRepository }) {
   const { state, controller } = useLibraryState(repository);
   const [newCategoryName, setNewCategoryName] = useState("");
-  const [newCategoryParentId, setNewCategoryParentId] = useState<string | null>(
-    null,
-  );
+  const [newChildCategoryName, setNewChildCategoryName] = useState("");
   const [newWorkTitle, setNewWorkTitle] = useState("");
   const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([]);
-  const [newRankingName, setNewRankingName] = useState("");
-  const [newRankingMode, setNewRankingMode] =
-    useState<RankingMode>("finalScore");
-  const [newRankingDimensionId, setNewRankingDimensionId] = useState("");
+  const [rankingPreviewMode, setRankingPreviewMode] =
+    useState<ScoreRankingMode>("finalScore");
+  const [rankingPreviewDimensionId, setRankingPreviewDimensionId] =
+    useState("");
   const [newTierListName, setNewTierListName] = useState("五级分级");
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -170,6 +156,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   const [exportPreferences, setExportPreferences] = useState<ExportPreferences>(
     () => loadExportPreferences(),
   );
+  const [storageDirectory, setStorageDirectory] = useState<string | null>(null);
   const desktopBridge = getDesktopBridge();
 
   const categoryTree = useMemo(
@@ -186,9 +173,9 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
       selectedCategory.id)
     : null;
   const selectedRootCategory = selectedCategoryRootId
-    ? state.library.categories.find(
+    ? (state.library.categories.find(
         (category) => category.id === selectedCategoryRootId,
-      )
+      ) ?? null)
     : null;
   const selectedCategoryLineage = selectedCategory
     ? getCategoryLineage(state.library, selectedCategory.id)
@@ -247,13 +234,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
       ),
     [activeTagFilters, categoryWorks],
   );
-  const categoryRankings = selectedRootCategory
-    ? sortRankingsByRecentUpdate(
-        state.library.rankings.filter(
-          (ranking) => ranking.categoryId === selectedRootCategory.id,
-        ),
-      )
-    : [];
   const categoryTierLists = selectedRootCategory
     ? sortTierListsByRecentUpdate(
         state.library.tierLists.filter(
@@ -266,17 +246,28 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         selectedRootCategory.ratingDimensionTemplates,
       )
     : [];
+  const selectedRankingPreviewDimensionId =
+    rankingPreviewMode === "dimension"
+      ? getRankingDimensionValue(
+          rankingPreviewDimensionId,
+          rankingDimensionOptions,
+        ) || null
+      : null;
+  const rankingPreviewWorks = useMemo(
+    () =>
+      sortWorksForRanking(sharedCategoryWorks, {
+        mode: rankingPreviewMode,
+        dimensionId: selectedRankingPreviewDimensionId,
+      }),
+    [
+      rankingPreviewMode,
+      selectedRankingPreviewDimensionId,
+      sharedCategoryWorks,
+    ],
+  );
   const selectedWork = state.selectedWorkId
     ? state.library.works.find((work) => work.id === state.selectedWorkId)
     : null;
-  const selectedRanking =
-    state.selectedRankingId && selectedRootCategory
-      ? state.library.rankings.find(
-          (ranking) =>
-            ranking.id === state.selectedRankingId &&
-            ranking.categoryId === selectedRootCategory.id,
-        )
-      : null;
   const selectedTierList =
     state.selectedTierListId && selectedRootCategory
       ? state.library.tierLists.find(
@@ -285,22 +276,45 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
             tierList.categoryId === selectedRootCategory.id,
         )
       : null;
-  const selectedRankingWorks = selectedRanking
-    ? getRankingWorks(state.library, selectedRanking)
-    : [];
   const coverImageUrls = useCoverImageUrls(repository, categoryWorks);
   const sharedCoverImageUrls = useCoverImageUrls(
     repository,
     sharedCategoryWorks,
   );
-  const categoryParentOptions = useMemo(
-    () => flattenCategoryTreeOptions(categoryTree),
-    [categoryTree],
-  );
+  const rootCategoryCount = state.library.categories.filter(
+    (category) => category.parentCategoryId === null,
+  ).length;
+  const childCategoryCount =
+    state.library.categories.length - rootCategoryCount;
 
   useEffect(() => {
     storeExportPreferences(exportPreferences);
   }, [exportPreferences]);
+
+  useEffect(() => {
+    if (!desktopBridge) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void desktopBridge
+      .getStorageDirectory()
+      .then((directory) => {
+        if (!cancelled) {
+          setStorageDirectory(directory);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStorageDirectory(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desktopBridge]);
 
   async function runAction<T>(action: () => Promise<T>): Promise<T | null> {
     setActionError(null);
@@ -322,8 +336,30 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     }
 
     await runAction(async () => {
-      await controller.createCategory(newCategoryName, newCategoryParentId);
+      await controller.createCategory(newCategoryName, null);
       setNewCategoryName("");
+    });
+  }
+
+  async function handleCreateChildCategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedRootCategory) {
+      setActionError("先选择一个大分类。");
+      return;
+    }
+
+    if (newChildCategoryName.trim().length === 0) {
+      setActionError("子分类名称不能为空。");
+      return;
+    }
+
+    await runAction(async () => {
+      await controller.createCategory(
+        newChildCategoryName,
+        selectedRootCategory.id,
+      );
+      setNewChildCategoryName("");
     });
   }
 
@@ -349,7 +385,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     }
 
     const confirmed = window.confirm(
-      `删除分类「${selectedCategory.name}」？相关作品、排行和分级也会删除。`,
+      `删除分类「${selectedCategory.name}」？相关作品和分级也会删除。`,
     );
 
     if (!confirmed) {
@@ -434,89 +470,50 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     );
   }
 
-  async function handleExportRankingShare() {
-    await openExportDialog("排行长图预览", () =>
-      controller.prepareSelectedRankingShare(),
+  async function handleExportRankingPreview() {
+    if (!selectedRootCategory) {
+      return;
+    }
+
+    const dimensionName =
+      selectedRankingPreviewDimensionId && rankingDimensionOptions.length > 0
+        ? getRankingDimensionName(
+            selectedRankingPreviewDimensionId,
+            rankingDimensionOptions,
+          )
+        : null;
+
+    await openExportDialog("排行预览", async () =>
+      createRankingPreviewShareImage({
+        categoryName: selectedRootCategory.name,
+        rankingName: "作品排行",
+        mode: rankingPreviewMode,
+        dimensionId: selectedRankingPreviewDimensionId,
+        dimensionName,
+        orderedWorks: rankingPreviewWorks,
+      }),
     );
   }
 
-  async function handleExportTierListShare() {
-    await openExportDialog("五级分级预览", () =>
-      controller.prepareSelectedTierListShare(),
+  async function handleExportTierListShare(input: TierListSaveInput) {
+    if (!selectedRootCategory || !selectedTierList) {
+      return;
+    }
+
+    await openExportDialog("五级分级预览", async () =>
+      createTierListPreviewShareImage({
+        tierListId: selectedTierList.id,
+        tierListName: input.name,
+        categoryName: selectedRootCategory.name,
+        levels: input.levels,
+        works: sharedCategoryWorks,
+        coverImages: sharedCoverImageUrls,
+      }),
     );
   }
 
   function closeExportDialog() {
     setExportDialog(null);
-  }
-
-  async function handleCreateRanking(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!selectedCategory) {
-      return;
-    }
-
-    const name = newRankingName.trim();
-
-    if (name.length === 0) {
-      setActionError("排行名称不能为空。");
-      return;
-    }
-
-    if (newRankingMode === "manual" && sharedCategoryWorks.length === 0) {
-      setActionError("手动排行需要至少一个作品。");
-      return;
-    }
-
-    const selectedDimensionId =
-      newRankingMode === "dimension"
-        ? getRankingDimensionValue(
-            newRankingDimensionId,
-            rankingDimensionOptions,
-          )
-        : null;
-
-    if (newRankingMode === "dimension" && !selectedDimensionId) {
-      setActionError("先为当前分类添加可用评分维度。");
-      return;
-    }
-
-    await runAction(async () => {
-      await controller.createRanking({
-        categoryId: selectedCategory.id,
-        name,
-        mode: newRankingMode,
-        dimensionId: selectedDimensionId,
-      });
-      setNewRankingName("");
-      setNewRankingMode("finalScore");
-      setNewRankingDimensionId("");
-    });
-  }
-
-  async function handleSaveRanking(input: RankingSaveInput) {
-    await runAction(async () => controller.updateSelectedRanking(input));
-  }
-
-  async function handleDeleteRanking() {
-    if (!selectedRanking) {
-      return;
-    }
-
-    const confirmed = window.confirm(`删除排行「${selectedRanking.name}」？`);
-
-    if (!confirmed) {
-      return;
-    }
-
-    await runAction(async () => controller.deleteSelectedRanking());
-  }
-
-  async function handleMoveRankingWork(workId: string, direction: -1 | 1) {
-    await runAction(async () =>
-      controller.moveSelectedRankingWork(workId, direction),
-    );
   }
 
   async function handleCreateTierList(event: FormEvent<HTMLFormElement>) {
@@ -568,6 +565,27 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
 
   async function handleRemoveTierListWork(workId: string) {
     await runAction(async () => controller.removeSelectedTierListWork(workId));
+  }
+
+  async function handleChooseStorageDirectory() {
+    if (!desktopBridge) {
+      return;
+    }
+
+    const directory = await runAction(async () => {
+      const selected = await desktopBridge.chooseStorageDirectory();
+
+      if (selected) {
+        await controller.refresh();
+      }
+
+      return selected;
+    });
+
+    if (directory) {
+      setStorageDirectory(directory);
+      setActionMessage(`已切换数据文件夹：${directory}`);
+    }
   }
 
   async function handleChooseExportDirectory() {
@@ -670,61 +688,70 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     setExportDialog(null);
   }
 
-  function renderCategoryNodes(
-    nodes: CategoryTreeNode[],
-    depth = 0,
-  ): ReactElement[] {
-    return nodes.flatMap((node) => {
-      const categoryScopeIds = new Set(
+  function renderCategoryNodes(nodes: CategoryTreeNode[]): ReactElement[] {
+    return nodes.map((node) => {
+      const rootScopeIds = new Set(
         getCategoryDescendantIds(state.library, node.category.id),
       );
       const workCount = state.library.works.filter((work) =>
-        categoryScopeIds.has(work.categoryId),
+        rootScopeIds.has(work.categoryId),
       ).length;
-      const rankingCount =
-        node.category.parentCategoryId === null
-          ? state.library.rankings.filter(
-              (ranking) => ranking.categoryId === node.category.id,
-            ).length
-          : 0;
-      const tierListCount =
-        node.category.parentCategoryId === null
-          ? state.library.tierLists.filter(
-              (tierList) => tierList.categoryId === node.category.id,
-            ).length
-          : 0;
-      const meta = [
-        `${workCount} 作品`,
-        ...(node.children.length > 0 ? [`${node.children.length} 子分类`] : []),
-        ...(node.category.parentCategoryId === null
-          ? [`${rankingCount} 排行`, `${tierListCount} 分级`]
-          : []),
-      ].join(" · ");
+      const childCount = node.children.length;
+      const selectedRoot = state.selectedCategoryId === node.category.id;
+      const selectedChild = node.children.some(
+        (child) => child.category.id === state.selectedCategoryId,
+      );
 
-      return [
-        <button
-          key={node.category.id}
-          className={
-            node.category.id === state.selectedCategoryId
-              ? "category-button selected"
-              : "category-button"
-          }
-          type="button"
-          style={{ paddingLeft: `${12 + depth * 18}px` }}
-          onClick={() => controller.selectCategory(node.category.id)}
-        >
-          <div className="category-button-row">
-            {node.children.length > 0 ? (
-              <ChevronDown aria-hidden="true" size={14} />
-            ) : (
-              <ChevronRight aria-hidden="true" size={14} />
-            )}
-            <span>{node.category.name}</span>
-          </div>
-          <small>{meta}</small>
-        </button>,
-        ...renderCategoryNodes(node.children, depth + 1),
-      ];
+      return (
+        <div className="category-group" key={node.category.id}>
+          <button
+            className={
+              selectedRoot || selectedChild
+                ? "category-root-button selected"
+                : "category-root-button"
+            }
+            type="button"
+            onClick={() => controller.selectCategory(node.category.id)}
+          >
+            <div className="category-button-row">
+              <FolderOpen aria-hidden="true" size={16} />
+              <span>{node.category.name}</span>
+            </div>
+            <small>
+              {workCount} 作品{childCount > 0 ? ` · ${childCount} 子分类` : ""}
+            </small>
+          </button>
+          {node.children.length > 0 ? (
+            <div className="category-child-list">
+              {node.children.map((child) => {
+                const childWorkCount = state.library.works.filter(
+                  (work) => work.categoryId === child.category.id,
+                ).length;
+                const selected = state.selectedCategoryId === child.category.id;
+
+                return (
+                  <button
+                    key={child.category.id}
+                    className={
+                      selected
+                        ? "category-child-button selected"
+                        : "category-child-button"
+                    }
+                    type="button"
+                    onClick={() => controller.selectCategory(child.category.id)}
+                  >
+                    <div className="category-button-row">
+                      <FolderPlus aria-hidden="true" size={15} />
+                      <span>{child.category.name}</span>
+                    </div>
+                    <small>{childWorkCount} 作品 · 共用上级设置</small>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      );
     });
   }
 
@@ -739,45 +766,75 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
           </div>
         </div>
 
+        {desktopBridge ? (
+          <section className="sidebar-card" aria-label="数据文件夹">
+            <div className="sidebar-card-heading">
+              <FolderOpen aria-hidden="true" size={16} />
+              <h3>数据文件夹</h3>
+            </div>
+            <p className="storage-directory-path">
+              {storageDirectory ?? "正在读取"}
+            </p>
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => void handleChooseStorageDirectory()}
+            >
+              <FolderOpen aria-hidden="true" size={16} />
+              选择数据文件夹
+            </button>
+          </section>
+        ) : null}
+
         <form
           className="create-form category-create-form"
           onSubmit={handleCreateCategory}
         >
-          <label htmlFor="new-category">新分类</label>
+          <label htmlFor="new-category">新大分类</label>
           <div className="inline-form-row">
             <input
               id="new-category"
               value={newCategoryName}
               onChange={(event) => setNewCategoryName(event.target.value)}
-              placeholder="影视作品 / 音乐 / Drama CD"
+              placeholder="动画 / 影视作品 / 音乐"
             />
             <button
               className="icon-button primary"
               type="submit"
-              aria-label="创建分类"
+              aria-label="创建大分类"
             >
               <FolderPlus aria-hidden="true" size={18} />
             </button>
           </div>
-          <label htmlFor="new-category-parent">父分类</label>
-          <select
-            id="new-category-parent"
-            value={newCategoryParentId ?? ""}
-            onChange={(event) =>
-              setNewCategoryParentId(
-                event.currentTarget.value.length > 0
-                  ? event.currentTarget.value
-                  : null,
-              )
-            }
-          >
-            <option value="">顶级分类</option>
-            {categoryParentOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+        </form>
+
+        <form
+          className="create-form category-create-form"
+          onSubmit={handleCreateChildCategory}
+        >
+          <label htmlFor="new-child-category">新子分类</label>
+          <div className="inline-form-row">
+            <input
+              id="new-child-category"
+              value={newChildCategoryName}
+              onChange={(event) => setNewChildCategoryName(event.target.value)}
+              placeholder={
+                selectedRootCategory ? "2026年1月新番" : "先选择一个大分类"
+              }
+              disabled={!selectedRootCategory}
+            />
+            <button
+              className="icon-button primary"
+              type="submit"
+              aria-label="创建子分类"
+              disabled={!selectedRootCategory}
+            >
+              <FolderPlus aria-hidden="true" size={18} />
+            </button>
+          </div>
+          {selectedRootCategory ? (
+            <p className="form-note">创建到「{selectedRootCategory.name}」。</p>
+          ) : null}
         </form>
 
         <nav className="category-list" aria-label="分类列表">
@@ -821,7 +878,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
               <section className="panel">
                 <div className="panel-heading">
                   <Pencil aria-hidden="true" size={18} />
-                  <h3>分类资料</h3>
+                  <h3>统一设置</h3>
                 </div>
 
                 {selectedCategory ? (
@@ -867,7 +924,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   </>
                 ) : (
                   <p className="muted">
-                    先创建一个分类，再添加作品、评分和排行。
+                    先创建一个大分类，再添加作品、评分和分级。
                   </p>
                 )}
               </section>
@@ -980,129 +1037,24 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
               <section className="panel">
                 <div className="panel-heading">
                   <Trophy aria-hidden="true" size={18} />
-                  <h3>排行</h3>
+                  <h3>排名预览</h3>
                 </div>
 
-                {selectedCategory ? (
-                  <>
-                    <form
-                      className="create-form ranking-create-form"
-                      onSubmit={handleCreateRanking}
-                    >
-                      <label htmlFor="new-ranking">新排行</label>
-                      <input
-                        id="new-ranking"
-                        value={newRankingName}
-                        onChange={(event) =>
-                          setNewRankingName(event.target.value)
-                        }
-                        placeholder="输入排行名称"
-                      />
-
-                      <div className="ranking-create-grid">
-                        <label className="sr-only" htmlFor="new-ranking-mode">
-                          排行方式
-                        </label>
-                        <select
-                          id="new-ranking-mode"
-                          value={newRankingMode}
-                          onChange={(event) => {
-                            const mode = event.target.value as RankingMode;
-                            setNewRankingMode(mode);
-                            if (mode !== "dimension") {
-                              setNewRankingDimensionId("");
-                            }
-                          }}
-                        >
-                          <option value="finalScore">最终评分</option>
-                          <option value="dimension">单维度评分</option>
-                          <option value="manual">手动排序</option>
-                        </select>
-
-                        <label
-                          className="sr-only"
-                          htmlFor="new-ranking-dimension"
-                        >
-                          评分维度
-                        </label>
-                        <select
-                          id="new-ranking-dimension"
-                          value={getRankingDimensionValue(
-                            newRankingDimensionId,
-                            rankingDimensionOptions,
-                          )}
-                          onChange={(event) =>
-                            setNewRankingDimensionId(event.target.value)
-                          }
-                          disabled={
-                            newRankingMode !== "dimension" ||
-                            rankingDimensionOptions.length === 0
-                          }
-                        >
-                          {rankingDimensionOptions.length > 0 ? (
-                            rankingDimensionOptions.map((dimension) => (
-                              <option key={dimension.id} value={dimension.id}>
-                                {dimension.name}
-                              </option>
-                            ))
-                          ) : (
-                            <option value="">暂无可用评分维度</option>
-                          )}
-                        </select>
-
-                        <button
-                          className="icon-button primary"
-                          type="submit"
-                          aria-label="创建排行"
-                        >
-                          <ListPlus aria-hidden="true" size={18} />
-                        </button>
-                      </div>
-                    </form>
-
-                    <div className="ranking-list" aria-label="排行列表">
-                      {categoryRankings.length > 0 ? (
-                        categoryRankings.map((ranking) => {
-                          const selected =
-                            ranking.id === state.selectedRankingId;
-
-                          return (
-                            <button
-                              key={ranking.id}
-                              className={
-                                selected
-                                  ? "ranking-button selected"
-                                  : "ranking-button"
-                              }
-                              type="button"
-                              onClick={() =>
-                                controller.selectRanking(ranking.id)
-                              }
-                            >
-                              <span>{ranking.name}</span>
-                              <small>
-                                {RANKING_MODE_LABELS[ranking.mode]}
-                                {ranking.mode === "dimension" &&
-                                ranking.dimensionId
-                                  ? ` · ${getRankingDimensionName(
-                                      ranking.dimensionId,
-                                      rankingDimensionOptions,
-                                    )}`
-                                  : ""}
-                                {" · "}
-                                {ranking.workIds.length} 作品
-                              </small>
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <p className="muted">这个分类还没有排行。</p>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <p className="muted">先创建一个分类，再创建排行。</p>
-                )}
+                <RankingPreviewPanel
+                  rootCategory={selectedRootCategory}
+                  mode={rankingPreviewMode}
+                  dimensionOptions={rankingDimensionOptions}
+                  selectedDimensionId={selectedRankingPreviewDimensionId}
+                  works={rankingPreviewWorks}
+                  onModeChange={(mode) => {
+                    setRankingPreviewMode(mode);
+                    if (mode !== "dimension") {
+                      setRankingPreviewDimensionId("");
+                    }
+                  }}
+                  onDimensionChange={setRankingPreviewDimensionId}
+                  onExport={handleExportRankingPreview}
+                />
               </section>
 
               <section className="panel">
@@ -1206,16 +1158,16 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                 </div>
                 <dl className="stats-grid">
                   <div>
-                    <dt>分类</dt>
-                    <dd>{state.library.categories.length}</dd>
+                    <dt>大分类</dt>
+                    <dd>{rootCategoryCount}</dd>
+                  </div>
+                  <div>
+                    <dt>子分类</dt>
+                    <dd>{childCategoryCount}</dd>
                   </div>
                   <div>
                     <dt>作品</dt>
                     <dd>{state.library.works.length}</dd>
-                  </div>
-                  <div>
-                    <dt>排行</dt>
-                    <dd>{state.library.rankings.length}</dd>
                   </div>
                   <div>
                     <dt>分级</dt>
@@ -1247,30 +1199,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   <p className="muted">
                     <BookOpen aria-hidden="true" size={16} />
                     选择或创建一个作品后，可以编辑封面、短评和长评。
-                  </p>
-                )}
-              </section>
-
-              <section className="panel">
-                <div className="panel-heading">
-                  <Trophy aria-hidden="true" size={18} />
-                  <h3>排行详情</h3>
-                </div>
-
-                {selectedRanking ? (
-                  <RankingEditor
-                    key={`${selectedRanking.id}-${selectedRanking.updatedAt}`}
-                    ranking={selectedRanking}
-                    works={selectedRankingWorks}
-                    dimensionOptions={rankingDimensionOptions}
-                    onSave={handleSaveRanking}
-                    onDelete={handleDeleteRanking}
-                    onMoveWork={handleMoveRankingWork}
-                    onExport={handleExportRankingShare}
-                  />
-                ) : (
-                  <p className="muted">
-                    选择或创建一个排行后，可以查看排序结果。
                   </p>
                 )}
               </section>
@@ -1469,7 +1397,7 @@ function CategoryDimensionEditor({
       onSubmit={(event) => void handleSubmit(event)}
     >
       <div className="dimension-header">
-        <h4>分类评分维度</h4>
+        <h4>统一评分维度</h4>
         <button
           className="text-button"
           type="button"
@@ -1533,7 +1461,7 @@ function CategoryDimensionEditor({
           })}
         </div>
       ) : (
-        <p className="muted">这个分类还没有评分维度。</p>
+        <p className="muted">这个大分类还没有评分维度。</p>
       )}
 
       {draftError ? (
@@ -1855,76 +1783,35 @@ function WorkEditor({
   );
 }
 
-interface RankingEditorProps {
-  ranking: Ranking;
-  works: Work[];
+interface RankingPreviewPanelProps {
+  rootCategory: Category | null;
+  mode: ScoreRankingMode;
   dimensionOptions: RankingDimensionOption[];
-  onSave(input: RankingSaveInput): Promise<void>;
-  onDelete(): Promise<void>;
-  onMoveWork(workId: string, direction: -1 | 1): Promise<void>;
-  onExport(): Promise<void>;
+  selectedDimensionId: string | null;
+  works: Work[];
+  onModeChange(mode: ScoreRankingMode): void;
+  onDimensionChange(dimensionId: string): void;
+  onExport(): Promise<void> | void;
 }
 
-interface RankingDraft {
-  name: string;
-  mode: RankingMode;
-  dimensionId: string;
-}
-
-function RankingEditor({
-  ranking,
-  works,
+function RankingPreviewPanel({
+  rootCategory,
+  mode,
   dimensionOptions,
-  onSave,
-  onDelete,
-  onMoveWork,
+  selectedDimensionId,
+  works,
+  onModeChange,
+  onDimensionChange,
   onExport,
-}: RankingEditorProps) {
-  const [draft, setDraft] = useState<RankingDraft>(() => ({
-    name: ranking.name,
-    mode: ranking.mode,
-    dimensionId: ranking.dimensionId ?? "",
-  }));
-  const [draftError, setDraftError] = useState<string | null>(null);
+}: RankingPreviewPanelProps) {
   const [isExporting, setIsExporting] = useState(false);
-  const editorDimensions = useMemo(
-    () => ensureRankingDimensionOption(dimensionOptions, ranking.dimensionId),
-    [dimensionOptions, ranking.dimensionId],
-  );
-  const selectedDimensionId = getRankingDimensionValue(
-    draft.dimensionId,
-    editorDimensions,
-  );
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (draft.name.trim().length === 0) {
-      setDraftError("排行名称不能为空。");
-      return;
-    }
-
-    if (draft.mode === "dimension" && !selectedDimensionId) {
-      setDraftError("先为当前分类添加可用评分维度。");
-      return;
-    }
-
-    if (draft.mode === "manual" && works.length === 0) {
-      setDraftError("手动排行需要至少一个作品。");
-      return;
-    }
-
-    setDraftError(null);
-
-    await onSave({
-      name: draft.name,
-      mode: draft.mode,
-      dimensionId: draft.mode === "dimension" ? selectedDimensionId : null,
-    });
-  }
+  const canExport =
+    rootCategory !== null &&
+    works.length > 0 &&
+    (mode !== "dimension" || selectedDimensionId !== null);
 
   async function handleExport() {
-    if (works.length === 0) {
+    if (!canExport) {
       return;
     }
 
@@ -1936,145 +1823,80 @@ function RankingEditor({
     }
   }
 
+  if (!rootCategory) {
+    return <p className="muted">先创建一个大分类，再查看排名。</p>;
+  }
+
   return (
-    <div className="ranking-editor">
-      <form
-        className="ranking-editor-form"
-        noValidate
-        onSubmit={(event) => void handleSubmit(event)}
-      >
-        <label htmlFor={`ranking-name-${ranking.id}`}>排行名称</label>
-        <input
-          id={`ranking-name-${ranking.id}`}
-          value={draft.name}
-          onChange={(event) =>
-            setDraft((current) => ({
-              ...current,
-              name: event.currentTarget.value,
-            }))
-          }
-        />
-
-        <div className="ranking-editor-grid">
-          <div>
-            <label htmlFor={`ranking-mode-${ranking.id}`}>排行方式</label>
-            <select
-              id={`ranking-mode-${ranking.id}`}
-              value={draft.mode}
-              onChange={(event) => {
-                const mode = event.currentTarget.value as RankingMode;
-                setDraft((current) => ({
-                  ...current,
-                  mode,
-                  dimensionId: mode === "dimension" ? current.dimensionId : "",
-                }));
-              }}
-            >
-              <option value="finalScore">最终评分</option>
-              <option value="dimension">单维度评分</option>
-              <option value="manual">手动排序</option>
-            </select>
-          </div>
-
-          <div>
-            <label htmlFor={`ranking-dimension-${ranking.id}`}>评分维度</label>
-            <select
-              id={`ranking-dimension-${ranking.id}`}
-              value={selectedDimensionId}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  dimensionId: event.currentTarget.value,
-                }))
-              }
-              disabled={
-                draft.mode !== "dimension" || editorDimensions.length === 0
-              }
-            >
-              {editorDimensions.length > 0 ? (
-                editorDimensions.map((dimension) => (
-                  <option key={dimension.id} value={dimension.id}>
-                    {dimension.name}
-                  </option>
-                ))
-              ) : (
-                <option value="">暂无可用评分维度</option>
-              )}
-            </select>
-          </div>
+    <div className="ranking-preview">
+      <div className="ranking-preview-controls">
+        <div>
+          <label htmlFor="ranking-preview-mode">排名方式</label>
+          <select
+            id="ranking-preview-mode"
+            value={mode}
+            onChange={(event) =>
+              onModeChange(event.currentTarget.value as ScoreRankingMode)
+            }
+          >
+            <option value="finalScore">最终评分</option>
+            <option value="dimension">单个评分维度</option>
+          </select>
         </div>
 
-        <div className="button-row">
-          <button className="text-button primary" type="submit">
-            <Save aria-hidden="true" size={16} />
-            保存排行
-          </button>
-          <button
-            className="text-button danger"
-            type="button"
-            onClick={() => void onDelete()}
+        <div>
+          <label htmlFor="ranking-preview-dimension">评分维度</label>
+          <select
+            id="ranking-preview-dimension"
+            value={selectedDimensionId ?? ""}
+            onChange={(event) => onDimensionChange(event.currentTarget.value)}
+            disabled={mode !== "dimension" || dimensionOptions.length === 0}
           >
-            <Trash2 aria-hidden="true" size={16} />
-            删除排行
-          </button>
-          <button
-            className="text-button"
-            type="button"
-            onClick={() => void handleExport()}
-            disabled={isExporting || works.length === 0}
-          >
-            <ImagePlus aria-hidden="true" size={16} />
-            {isExporting ? "导出中" : "导出排行长图"}
-          </button>
+            {dimensionOptions.length > 0 ? (
+              dimensionOptions.map((dimension) => (
+                <option key={dimension.id} value={dimension.id}>
+                  {dimension.name}
+                </option>
+              ))
+            ) : (
+              <option value="">暂无可用评分维度</option>
+            )}
+          </select>
         </div>
+      </div>
 
-        {works.length === 0 ? (
-          <p className="inline-hint">先添加作品，再导出排行长图。</p>
-        ) : null}
+      <div className="button-row">
+        <button
+          className="text-button"
+          type="button"
+          onClick={() => void handleExport()}
+          disabled={isExporting || !canExport}
+        >
+          <ImagePlus aria-hidden="true" size={16} />
+          {isExporting ? "导出中" : "导出排名图"}
+        </button>
+      </div>
 
-        {draftError ? (
-          <p className="inline-error" role="alert">
-            {draftError}
-          </p>
-        ) : null}
-      </form>
+      {mode === "dimension" && dimensionOptions.length === 0 ? (
+        <p className="inline-hint">先添加评分维度，再按单个维度排名。</p>
+      ) : null}
 
       {works.length > 0 ? (
-        <ol className="ranking-work-list" aria-label="排行作品">
+        <ol className="ranking-work-list" aria-label="排名作品">
           {works.map((work, index) => (
             <li className="ranking-work-row" key={work.id}>
               <span className="rank-number">{index + 1}</span>
               <div className="ranking-work-copy">
                 <strong>{work.title}</strong>
-                <small>{formatRankingWorkScore(work, ranking)}</small>
+                <small>
+                  {formatRankingPreviewScore(work, mode, selectedDimensionId)}
+                </small>
               </div>
-              {ranking.mode === "manual" ? (
-                <div className="ranking-work-actions">
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label={`上移 ${work.title}`}
-                    disabled={index === 0}
-                    onClick={() => void onMoveWork(work.id, -1)}
-                  >
-                    <ArrowUp aria-hidden="true" size={16} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label={`下移 ${work.title}`}
-                    disabled={index === works.length - 1}
-                    onClick={() => void onMoveWork(work.id, 1)}
-                  >
-                    <ArrowDown aria-hidden="true" size={16} />
-                  </button>
-                </div>
-              ) : null}
             </li>
           ))}
         </ol>
       ) : (
-        <p className="muted">这个排行还没有作品。</p>
+        <p className="muted">这个大分类还没有作品。</p>
       )}
     </div>
   );
@@ -2088,7 +1910,7 @@ interface TierListEditorProps {
   onDelete(): Promise<void>;
   onMoveWork(workId: string, levelId: TierLevelId): Promise<void>;
   onRemoveWork(workId: string): Promise<void>;
-  onExport(): Promise<void>;
+  onExport(input: TierListSaveInput): Promise<void>;
 }
 
 function TierListEditor({
@@ -2102,6 +1924,12 @@ function TierListEditor({
   onExport,
 }: TierListEditorProps) {
   const [name, setName] = useState(tierList.name);
+  const [levelDrafts, setLevelDrafts] = useState<TierLevel[]>(() =>
+    tierList.levels.map((level) => ({
+      ...level,
+      workIds: [...level.workIds],
+    })),
+  );
   const [draftError, setDraftError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const workById = useMemo(
@@ -2126,7 +1954,16 @@ function TierListEditor({
     }
 
     setDraftError(null);
-    await onSave({ name });
+    await onSave({ name, levels: levelDrafts });
+  }
+
+  function updateLevelName(levelId: TierLevelId, nextName: string) {
+    setDraftError(null);
+    setLevelDrafts((current) =>
+      current.map((level) =>
+        level.id === levelId ? { ...level, name: nextName } : level,
+      ),
+    );
   }
 
   async function handleExport() {
@@ -2134,9 +1971,15 @@ function TierListEditor({
       return;
     }
 
+    if (name.trim().length === 0) {
+      setDraftError("分级名称不能为空。");
+      return;
+    }
+
+    setDraftError(null);
     setIsExporting(true);
     try {
-      await onExport();
+      await onExport({ name, levels: levelDrafts });
     } finally {
       setIsExporting(false);
     }
@@ -2180,6 +2023,29 @@ function TierListEditor({
           </button>
         </div>
 
+        <div className="tier-level-editor">
+          <div className="tier-section-heading">
+            <h4>等级名称</h4>
+            <small>可直接修改导出显示</small>
+          </div>
+          <div className="tier-level-name-grid">
+            {levelDrafts.map((level, index) => (
+              <div className="tier-level-name-field" key={level.id}>
+                <label htmlFor={`tier-level-name-${tierList.id}-${level.id}`}>
+                  等级 {index + 1}
+                </label>
+                <input
+                  id={`tier-level-name-${tierList.id}-${level.id}`}
+                  value={level.name}
+                  onChange={(event) =>
+                    updateLevelName(level.id, event.currentTarget.value)
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
         {!hasAssignedWorks ? (
           <p className="inline-hint">至少放入一个作品后再导出分级图。</p>
         ) : null}
@@ -2205,7 +2071,7 @@ function TierListEditor({
                 key={work.id}
                 work={work}
                 coverImageUrl={coverImageUrls.get(work.id) ?? null}
-                levels={tierList.levels}
+                levels={levelDrafts}
                 currentLevelId={null}
                 onMoveWork={onMoveWork}
                 onRemoveWork={onRemoveWork}
@@ -2218,7 +2084,7 @@ function TierListEditor({
       </div>
 
       <div className="tier-board" aria-label="五级分级">
-        {tierList.levels.map((level) => {
+        {levelDrafts.map((level) => {
           const levelWorks = level.workIds.flatMap((workId) => {
             const work = workById.get(workId);
             return work ? [work] : [];
@@ -2237,7 +2103,7 @@ function TierListEditor({
                       key={work.id}
                       work={work}
                       coverImageUrl={coverImageUrls.get(work.id) ?? null}
-                      levels={tierList.levels}
+                      levels={levelDrafts}
                       currentLevelId={level.id}
                       onMoveWork={onMoveWork}
                       onRemoveWork={onRemoveWork}
@@ -2456,23 +2322,6 @@ function failDimensionDraft(message: string): RatingDimensionDraftState {
   };
 }
 
-function ensureRankingDimensionOption(
-  options: RankingDimensionOption[],
-  dimensionId: string | null,
-): RankingDimensionOption[] {
-  if (!dimensionId || options.some((option) => option.id === dimensionId)) {
-    return options;
-  }
-
-  return [
-    ...options,
-    {
-      id: dimensionId,
-      name: `维度 ${dimensionId}`,
-    },
-  ];
-}
-
 function getRankingDimensionValue(
   dimensionId: string,
   options: RankingDimensionOption[],
@@ -2492,10 +2341,14 @@ function getRankingDimensionName(
   );
 }
 
-function formatRankingWorkScore(work: Work, ranking: Ranking): string {
-  if (ranking.mode === "dimension" && ranking.dimensionId) {
+function formatRankingPreviewScore(
+  work: Work,
+  mode: ScoreRankingMode,
+  dimensionId: string | null,
+): string {
+  if (mode === "dimension" && dimensionId) {
     const dimension = work.ratingDimensions.find(
-      (item) => item.id === ranking.dimensionId,
+      (item) => item.id === dimensionId,
     );
     return dimension ? `${dimension.score} 分` : "未评分";
   }
@@ -2510,31 +2363,9 @@ function countTierListWorks(tierList: TierList): number {
   );
 }
 
-interface CategoryTreeOption {
-  id: string;
-  label: string;
-}
-
 interface TagOption {
   value: string;
   count: number;
-}
-
-function flattenCategoryTreeOptions(
-  nodes: CategoryTreeNode[],
-  lineage: string[] = [],
-): CategoryTreeOption[] {
-  return nodes.flatMap((node) => {
-    const nextLineage = [...lineage, node.category.name];
-
-    return [
-      {
-        id: node.category.id,
-        label: nextLineage.join(" / "),
-      },
-      ...flattenCategoryTreeOptions(node.children, nextLineage),
-    ];
-  });
 }
 
 function collectTagOptions(works: Work[]): TagOption[] {

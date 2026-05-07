@@ -10,22 +10,18 @@ import { App } from "../src/App";
 
 describe("app workflow", () => {
   beforeEach(() => {
-    delete (window as typeof window & { __rankingMemoryBackend?: unknown })
-      .__rankingMemoryBackend;
+    delete (window as typeof window & { __tasteLedgerMemoryBackend?: unknown })
+      .__tasteLedgerMemoryBackend;
   });
 
-  it("creates a category, creates a work, and persists reviews", async () => {
+  it("creates a big category, creates a work, and persists reviews", async () => {
     render(<App />);
 
     expect(
       await screen.findByRole("heading", { name: "Taste Ledger" }),
     ).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("新分类"), {
-      target: { value: "影视作品" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
-
+    await createRootCategory("影视作品");
     expect(
       await screen.findByRole("button", { name: /影视作品/ }),
     ).toBeInTheDocument();
@@ -49,24 +45,7 @@ describe("app workflow", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存评分维度" }));
     await flushUi();
 
-    fireEvent.change(screen.getByLabelText("新作品"), {
-      target: { value: "作品 A" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建作品" }));
-
-    expect(
-      await screen.findByRole("button", { name: /作品 A/ }),
-    ).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("评分 1"), {
-      target: { value: "9" },
-    });
-
-    fireEvent.change(screen.getByLabelText("评分 2"), {
-      target: { value: "8" },
-    });
-
-    await screen.findByText("当前评分 8.67");
+    await createScoredWork("作品 A", 8);
 
     fireEvent.change(screen.getByLabelText("短评"), {
       target: { value: "短评内容" },
@@ -78,7 +57,7 @@ describe("app workflow", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /作品 A/ })).toHaveTextContent(
-        "8.67 分",
+        "8 分",
       );
     });
 
@@ -90,19 +69,16 @@ describe("app workflow", () => {
       ).toBeInTheDocument();
       expect(screen.getByLabelText("短评")).toHaveValue("短评内容");
       expect(screen.getByLabelText("长评")).toHaveValue("第一段\n第二段");
-      expect(screen.getByText("当前评分 8.67")).toBeInTheDocument();
+      expect(screen.getByText("当前评分 8")).toBeInTheDocument();
     });
   });
 
-  it("creates an automatic ranking and refreshes it after scoring changes", async () => {
+  it("shows a ranking preview and refreshes it after scoring changes", async () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "Taste Ledger" });
 
-    fireEvent.change(screen.getByLabelText("新分类"), {
-      target: { value: "影视作品" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await createRootCategory("影视作品");
     await screen.findByRole("button", { name: /影视作品/ });
 
     fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
@@ -118,17 +94,8 @@ describe("app workflow", () => {
     await createScoredWork("作品 A", 8);
     await createScoredWork("作品 B", 10);
 
-    fireEvent.change(screen.getByLabelText("新排行"), {
-      target: { value: "作品排行" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建排行" }));
-
-    expect(
-      await screen.findByRole("button", { name: /作品排行/ }),
-    ).toBeInTheDocument();
-
     await waitFor(() => {
-      const rows = within(screen.getByLabelText("排行作品")).getAllByRole(
+      const rows = within(screen.getByLabelText("排名作品")).getAllByRole(
         "listitem",
       );
       expect(rows[0]).toHaveTextContent("作品 B");
@@ -143,7 +110,7 @@ describe("app workflow", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存作品" }));
 
     await waitFor(() => {
-      const rows = within(screen.getByLabelText("排行作品")).getAllByRole(
+      const rows = within(screen.getByLabelText("排名作品")).getAllByRole(
         "listitem",
       );
       expect(rows[0]).toHaveTextContent("作品 A");
@@ -156,10 +123,7 @@ describe("app workflow", () => {
 
     await screen.findByRole("heading", { name: "Taste Ledger" });
 
-    fireEvent.change(screen.getByLabelText("新分类"), {
-      target: { value: "动画" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await createRootCategory("动画");
     await screen.findByRole("button", { name: /动画/ });
 
     fireEvent.change(screen.getByLabelText("新作品"), {
@@ -208,29 +172,18 @@ describe("app workflow", () => {
     });
   });
 
-  it("creates child categories from the parent selector", async () => {
+  it("creates child categories under the selected big category", async () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "Taste Ledger" });
 
-    fireEvent.change(screen.getByLabelText("新分类"), {
-      target: { value: "动画" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await createRootCategory("动画");
     await screen.findByRole("button", { name: /动画/ });
 
-    const parentSelect = screen.getByLabelText("父分类");
-    const rootOption = within(parentSelect).getByRole("option", {
-      name: "动画",
-    }) as HTMLOptionElement;
-
-    fireEvent.change(parentSelect, {
-      target: { value: rootOption.value },
-    });
-    fireEvent.change(screen.getByLabelText("新分类"), {
+    fireEvent.change(screen.getByLabelText("新子分类"), {
       target: { value: "2026年1月新番" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建子分类" }));
 
     const childButton = await screen.findByRole("button", {
       name: /2026年1月新番/,
@@ -245,15 +198,12 @@ describe("app workflow", () => {
     ).toBeInTheDocument();
   });
 
-  it("exports ranking share images in the displayed order", async () => {
+  it("exports ranking preview images in the displayed order", async () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "Taste Ledger" });
 
-    fireEvent.change(screen.getByLabelText("新分类"), {
-      target: { value: "影视作品" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await createRootCategory("影视作品");
     await screen.findByRole("button", { name: /影视作品/ });
 
     fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
@@ -269,23 +219,17 @@ describe("app workflow", () => {
     await createScoredWork("作品 A", 8);
     await createScoredWork("作品 B", 10);
 
-    fireEvent.change(screen.getByLabelText("新排行"), {
-      target: { value: "作品排行" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建排行" }));
-    await screen.findByRole("button", { name: /作品排行/ });
-
     await waitFor(() => {
-      const rows = within(screen.getByLabelText("排行作品")).getAllByRole(
+      const rows = within(screen.getByLabelText("排名作品")).getAllByRole(
         "listitem",
       );
       expect(rows[0]).toHaveTextContent("作品 B");
       expect(rows[1]).toHaveTextContent("作品 A");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "导出排行长图" }));
+    fireEvent.click(screen.getByRole("button", { name: "导出排名图" }));
     expect(
-      await screen.findByRole("dialog", { name: "排行长图预览" }),
+      await screen.findByRole("dialog", { name: "排行预览" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "导出文件" }));
     await waitFor(() => {
@@ -295,28 +239,16 @@ describe("app workflow", () => {
     });
   });
 
-  it("prevents empty ranking share exports", async () => {
+  it("prevents empty ranking preview exports", async () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "Taste Ledger" });
 
-    fireEvent.change(screen.getByLabelText("新分类"), {
-      target: { value: "影视作品" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await createRootCategory("影视作品");
     await screen.findByRole("button", { name: /影视作品/ });
 
-    fireEvent.change(screen.getByLabelText("新排行"), {
-      target: { value: "空排行" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建排行" }));
-
-    expect(
-      await screen.findByRole("button", { name: "导出排行长图" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByText("先添加作品，再导出排行长图。"),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出排名图" })).toBeDisabled();
+    expect(screen.getByText("这个大分类还没有作品。")).toBeInTheDocument();
   });
 
   it("exports work share images into the data directory", async () => {
@@ -324,10 +256,7 @@ describe("app workflow", () => {
 
     await screen.findByRole("heading", { name: "Taste Ledger" });
 
-    fireEvent.change(screen.getByLabelText("新分类"), {
-      target: { value: "影视作品" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await createRootCategory("影视作品");
     await screen.findByRole("button", { name: /影视作品/ });
 
     fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
@@ -365,15 +294,12 @@ describe("app workflow", () => {
     });
   });
 
-  it("exports a five-level tier image with cover-based placement", async () => {
+  it("exports a five-level tier image with editable labels and cover placement", async () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "Taste Ledger" });
 
-    fireEvent.change(screen.getByLabelText("新分类"), {
-      target: { value: "影视作品" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建分类" }));
+    await createRootCategory("影视作品");
     await screen.findByRole("button", { name: /影视作品/ });
 
     fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
@@ -391,6 +317,14 @@ describe("app workflow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "创建分级" }));
     await screen.findByRole("button", { name: /五级分级/ });
+
+    fireEvent.change(screen.getByLabelText("等级 1"), {
+      target: { value: "神作" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存分级" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("等级 1")).toHaveValue("神作");
+    });
 
     fireEvent.change(screen.getByLabelText("移动 作品 A"), {
       target: { value: "tier-1" },
@@ -419,6 +353,13 @@ describe("app workflow", () => {
   });
 });
 
+function createRootCategory(name: string) {
+  fireEvent.change(screen.getByLabelText("新大分类"), {
+    target: { value: name },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "创建大分类" }));
+}
+
 async function createScoredWork(title: string, score: number) {
   fireEvent.change(screen.getByLabelText("新作品"), {
     target: { value: title },
@@ -429,9 +370,11 @@ async function createScoredWork(title: string, score: number) {
     await screen.findByRole("button", { name: new RegExp(title) }),
   ).toBeInTheDocument();
 
-  fireEvent.change(screen.getByLabelText("评分 1"), {
-    target: { value: String(score) },
-  });
+  for (const input of screen.getAllByLabelText(/^评分 \d+$/)) {
+    fireEvent.change(input, {
+      target: { value: String(score) },
+    });
+  }
 
   await screen.findByText(`当前评分 ${score}`);
   fireEvent.click(screen.getByRole("button", { name: "保存作品" }));

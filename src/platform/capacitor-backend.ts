@@ -3,7 +3,7 @@ import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import type { JsonFileBackend } from "../core/repository";
 import { joinDataPath } from "../core/repository";
 
-const DATA_ROOT = "ranking-data";
+const DATA_ROOT = "taste-ledger-data";
 
 export function createCapacitorFilesystemBackend(): JsonFileBackend {
   let initialization: Promise<void> | null = null;

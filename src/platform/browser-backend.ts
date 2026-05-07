@@ -1,7 +1,7 @@
 import type { JsonFileBackend } from "../core/repository";
 
-const TEXT_PREFIX = "ranking:text:";
-const BYTES_PREFIX = "ranking:bytes:";
+const TEXT_PREFIX = "taste-ledger:text:";
+const BYTES_PREFIX = "taste-ledger:bytes:";
 
 export function createBrowserStorageBackend(): JsonFileBackend {
   return {

@@ -10,13 +10,13 @@ export interface NativeBridge {
 
 declare global {
   interface Window {
-    rankingNative?: NativeBridge;
+    tasteLedgerNative?: NativeBridge;
   }
 }
 
 export async function createRuntimeBackend(): Promise<JsonFileBackend> {
-  if (typeof window !== "undefined" && window.rankingNative?.storage) {
-    return window.rankingNative.storage;
+  if (typeof window !== "undefined" && window.tasteLedgerNative?.storage) {
+    return window.tasteLedgerNative.storage;
   }
 
   if (typeof window !== "undefined" && Capacitor.isNativePlatform()) {
@@ -29,14 +29,14 @@ export async function createRuntimeBackend(): Promise<JsonFileBackend> {
 
   if (typeof window !== "undefined") {
     const globalWindow = window as typeof window & {
-      __rankingMemoryBackend?: JsonFileBackend;
+      __tasteLedgerMemoryBackend?: JsonFileBackend;
     };
 
-    if (!globalWindow.__rankingMemoryBackend) {
-      globalWindow.__rankingMemoryBackend = createMemoryBackend();
+    if (!globalWindow.__tasteLedgerMemoryBackend) {
+      globalWindow.__tasteLedgerMemoryBackend = createMemoryBackend();
     }
 
-    return globalWindow.__rankingMemoryBackend;
+    return globalWindow.__tasteLedgerMemoryBackend;
   }
 
   return createBrowserStorageBackend();

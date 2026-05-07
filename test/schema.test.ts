@@ -276,6 +276,38 @@ describe("library schema", () => {
     );
   });
 
+  it("rejects subcategories nested below another subcategory", () => {
+    const library = sampleLibrary();
+    library.categories.push({
+      id: "cat-film-2026-01",
+      parentCategoryId: "cat-film",
+      name: "2026年1月新番",
+      createdAt: now,
+      updatedAt: now,
+      ratingDimensionTemplates: [],
+    });
+    library.categories.push({
+      id: "cat-film-2026-01-a",
+      parentCategoryId: "cat-film-2026-01",
+      name: "第 1 周",
+      createdAt: now,
+      updatedAt: now,
+      ratingDimensionTemplates: [],
+    });
+
+    const result = validateLibrary(library);
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.categories[3].parentCategoryId",
+          message: "Subcategories may only be one level deep.",
+        }),
+      ]),
+    );
+  });
+
   it("throws a typed validation error when assertion fails", () => {
     expect(() => assertValidLibrary({ schemaVersion: 999 })).toThrow(
       "Expected schema version 1.",
