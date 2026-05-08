@@ -556,6 +556,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
       return;
     }
 
+    const categoryId = input.categoryId;
     const dimensionState = readDimensionDrafts(input.ratingDimensions);
 
     if (dimensionState.errorMessage) {
@@ -565,6 +566,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
 
     const workId = await runAction(async () => {
       const saveInput = {
+        categoryId,
         title,
         tags: parseTagText(input.tagsText),
         shortReview: input.shortReview,
@@ -590,7 +592,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         return input.workId;
       }
 
-      controller.selectCategory(input.categoryId);
+      controller.selectCategory(categoryId);
       const createdWorkId = await controller.createWork(title);
       await controller.updateSelectedWork(saveInput);
 
@@ -605,6 +607,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     });
 
     if (workId) {
+      controller.selectCategory(input.categoryId);
       controller.selectWork(workId);
       setActiveModal(null);
       setActiveView("work");
@@ -2383,7 +2386,6 @@ function WorkModal({
     : dimensionState.finalScore === null
       ? "当前大类还没有评分维度"
       : `当前评分 ${dimensionState.finalScore}`;
-  const categoryControlsDisabled = state.mode === "edit";
 
   function updateField(
     field: keyof Pick<
@@ -2486,7 +2488,6 @@ function WorkModal({
                     onChange={(event) =>
                       onCategoryChange(event.currentTarget.value || null)
                     }
-                    disabled={categoryControlsDisabled}
                   >
                     {rootCategories.map((category) => (
                       <option key={category.id} value={category.id}>
@@ -2506,9 +2507,7 @@ function WorkModal({
                         event.currentTarget.value || selectedRootId || null,
                       )
                     }
-                    disabled={
-                      categoryControlsDisabled || selectedRootCategory === null
-                    }
+                    disabled={selectedRootCategory === null}
                   >
                     <option value="">不使用小类</option>
                     {childCategories.map((category) => (
@@ -2519,10 +2518,6 @@ function WorkModal({
                   </select>
                 </div>
               </div>
-
-              {categoryControlsDisabled ? (
-                <p className="form-note">编辑已有作品时暂不移动分类。</p>
-              ) : null}
 
               <div className="modal-field">
                 <label htmlFor="work-modal-tags">标签</label>

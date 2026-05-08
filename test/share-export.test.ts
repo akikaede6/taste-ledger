@@ -123,14 +123,16 @@ describe("work share export", () => {
     });
   });
 
-  it("renders work exports without a visible title line", () => {
+  it("renders work exports in the reference card style", () => {
     const svg = renderWorkShareSvg(
       buildWorkSharePayload(shareLibrary(), "work-a", "cover"),
     );
 
     expect(svg).toContain('aria-label="作品 A"');
-    expect(svg).not.toContain(">作品 A</text>");
-    expect(svg).not.toContain('font-size="58"');
+    expect(svg).toContain(">作品 A</text>");
+    expect(svg).toContain("作品赏析");
+    expect(svg).toContain("REVIEW");
+    expect(svg).toContain("剧情");
   });
 
   it("renders long review content only for long exports", () => {
@@ -275,7 +277,7 @@ describe("work share export", () => {
     expect(svg).toContain("作品排行");
     expect(svg.indexOf("作品 B")).toBeLessThan(svg.indexOf("作品 A"));
     expect(svg).toContain("按最终评分");
-    expect(svg).toContain("作品顺位");
+    expect(svg).toContain("分值排名");
     expect(svg).toContain("10 分");
   });
 

@@ -34,6 +34,7 @@ export interface WorkInput {
 }
 
 export interface WorkUpdateInput {
+  categoryId?: string;
   title?: string;
   coverImagePath?: string | null;
   tags?: string[];
@@ -292,7 +293,13 @@ export function updateWork(
     throw new Error("Work not found.");
   }
 
-  const category = findCategory(next, work.categoryId);
+  const originalCategoryId = work.categoryId;
+  const originalCategory = findCategory(next, originalCategoryId);
+  const originalRootCategoryId = originalCategory
+    ? (getCategoryRootId(next, originalCategory.id) ?? originalCategory.id)
+    : null;
+  const nextCategoryId = input.categoryId ?? originalCategoryId;
+  const category = findCategory(next, nextCategoryId);
   const rootCategoryId = category
     ? (getCategoryRootId(next, category.id) ?? category.id)
     : null;
@@ -300,9 +307,15 @@ export function updateWork(
     ? findCategory(next, rootCategoryId)
     : undefined;
 
-  if (!category || !sharedCategory) {
+  if (!originalCategory || !originalRootCategoryId) {
     throw new Error("Work category not found.");
   }
+
+  if (!category || !sharedCategory) {
+    throw new Error("Category not found.");
+  }
+
+  work.categoryId = category.id;
 
   if (input.title !== undefined) {
     const title = input.title.trim();
@@ -347,8 +360,24 @@ export function updateWork(
     updatedAt: now,
   });
   Object.assign(work, updatedWork);
-  touchCategoryPath(next, work.categoryId, now);
-  refreshCategoryRankings(next, sharedCategory.id, now);
+  touchCategoryPath(next, originalCategoryId, now);
+
+  if (originalCategoryId !== work.categoryId) {
+    touchCategoryPath(next, work.categoryId, now);
+  }
+
+  removeWorkFromOutOfScopeTierLists(next, work.id, now);
+
+  if (originalRootCategoryId === sharedCategory.id) {
+    refreshCategoryRankings(next, sharedCategory.id, now);
+  } else {
+    refreshCategoryRankings(next, originalRootCategoryId, now, {
+      removedWorkId: work.id,
+    });
+    refreshCategoryRankings(next, sharedCategory.id, now, {
+      addedWorkId: work.id,
+    });
+  }
 
   return next;
 }
@@ -801,6 +830,46 @@ function refreshCategoryRankings(
       ...nextRanking,
       updatedAt: now,
     };
+  });
+}
+
+function removeWorkFromOutOfScopeTierLists(
+  library: Library,
+  workId: string,
+  now: string,
+) {
+  const work = findWork(library, workId);
+
+  if (!work) {
+    return;
+  }
+
+  library.tierLists = library.tierLists.map((tierList) => {
+    if (isCategoryInScope(library, tierList.categoryId, work.categoryId)) {
+      return tierList;
+    }
+
+    let changed = false;
+    const levels = tierList.levels.map((level) => {
+      const workIds = level.workIds.filter((item) => item !== workId);
+
+      if (workIds.length !== level.workIds.length) {
+        changed = true;
+      }
+
+      return {
+        ...level,
+        workIds,
+      };
+    });
+
+    return changed
+      ? {
+          ...tierList,
+          levels,
+          updatedAt: now,
+        }
+      : tierList;
   });
 }
 

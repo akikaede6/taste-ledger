@@ -458,7 +458,27 @@ export function createLibraryController(
       }
 
       const nextLibrary = updateWork(state.library, workId, input);
-      await saveLibrary(nextLibrary);
+      const work = nextLibrary.works.find((item) => item.id === workId);
+      const selectedCategoryId = work?.categoryId ?? state.selectedCategoryId;
+      const rootCategoryId = selectedCategoryId
+        ? (getCategoryRootId(nextLibrary, selectedCategoryId) ??
+          selectedCategoryId)
+        : null;
+
+      await saveLibrary(nextLibrary, {
+        selectedCategoryId,
+        selectedWorkId: workId,
+        selectedRankingId: resolveSharedRankingId(
+          nextLibrary,
+          rootCategoryId,
+          state.selectedRankingId,
+        ),
+        selectedTierListId: resolveSharedTierListId(
+          nextLibrary,
+          rootCategoryId,
+          state.selectedTierListId,
+        ),
+      });
     },
 
     async deleteSelectedWork() {

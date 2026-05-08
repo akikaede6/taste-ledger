@@ -165,6 +165,64 @@ describe("app workflow", () => {
     ).toBeInTheDocument();
   });
 
+  it("allows editing a work's big category and subcategory", async () => {
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Taste Ledger" });
+
+    await createRootCategory("动画");
+    await screen.findByRole("button", { name: /^动画/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "添加评分维度" }));
+    fireEvent.change(screen.getByLabelText("维度名称 1"), {
+      target: { value: "剧情" },
+    });
+    fireEvent.change(screen.getByLabelText("权重 1"), {
+      target: { value: "1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存评分维度" }));
+    await flushUi();
+
+    await createScoredWork("作品 A", 8);
+
+    fireEvent.click(screen.getByRole("button", { name: "创建大分类" }));
+    fireEvent.change(screen.getByLabelText("大类名称"), {
+      target: { value: "电影" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "确认创建" }));
+    await screen.findByRole("button", { name: /^电影/ });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "在 电影 下创建子分类" }),
+    );
+    fireEvent.change(screen.getByLabelText("小类名称"), {
+      target: { value: "院线" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "完成创建" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^动画/ }));
+    fireEvent.click(getWorkButton(/作品 A/));
+    fireEvent.click(screen.getByRole("button", { name: "编辑评测" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "编辑评测" });
+    const rootSelect = within(dialog).getByLabelText("所属大类");
+
+    fireEvent.change(rootSelect, {
+      target: { value: selectOptionValue(rootSelect, "电影") },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存作品" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "编辑评测" }),
+      ).not.toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("电影")).toBeInTheDocument();
+    });
+  });
+
   it("exports ranking preview images in the displayed order", async () => {
     render(<App />);
 
@@ -415,6 +473,19 @@ function getWorkButton(name: string | RegExp) {
   return within(screen.getByLabelText("作品列表")).getByRole("button", {
     name,
   });
+}
+
+function selectOptionValue(select: HTMLElement, optionLabel: string) {
+  const element = select as HTMLSelectElement;
+  const option = Array.from(element.options).find(
+    (item) => item.textContent === optionLabel,
+  );
+
+  if (!option) {
+    throw new Error(`Option ${optionLabel} not found.`);
+  }
+
+  return option.value;
 }
 
 function createDataTransfer() {

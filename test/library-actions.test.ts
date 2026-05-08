@@ -424,6 +424,93 @@ describe("category actions", () => {
     });
   });
 
+  it("moves a work to another category and refreshes shared data", () => {
+    vi.setSystemTime(new Date("2026-05-05T02:24:00.000Z"));
+
+    let library = createEmptyLibrary();
+    library = createCategory(library, { name: "动画" });
+    const animationCategory = library.categories[0];
+    library = updateCategoryRatingDimensions(library, animationCategory.id, [
+      {
+        id: "story",
+        name: "剧情",
+        weight: 1,
+      },
+    ]);
+    library = createCategory(library, {
+      name: "电影",
+    });
+    const movieCategory = library.categories[1];
+    library = updateCategoryRatingDimensions(library, movieCategory.id, [
+      {
+        id: "scene",
+        name: "画面",
+        weight: 2,
+      },
+    ]);
+    const createdMovieRanking = createRanking(library, {
+      categoryId: movieCategory.id,
+      name: "电影排行",
+      mode: "finalScore",
+    });
+    library = createdMovieRanking.library;
+    library = createCategory(library, {
+      name: "2026年1月新番",
+      parentCategoryId: movieCategory.id,
+    });
+    const movieChildCategory = library.categories[2];
+
+    const createdWork = createWork(library, {
+      categoryId: animationCategory.id,
+      title: "作品 D",
+    });
+
+    const createdRanking = createRanking(createdWork.library, {
+      categoryId: animationCategory.id,
+      name: "动画排行",
+      mode: "finalScore",
+    });
+    const createdTierList = createTierList(createdRanking.library, {
+      categoryId: animationCategory.id,
+      name: "动画分级",
+    });
+
+    const next = updateWork(createdTierList.library, createdWork.work.id, {
+      categoryId: movieChildCategory.id,
+      ratingDimensions: [
+        {
+          id: "scene",
+          name: "画面",
+          score: 9,
+          weight: 2,
+        },
+      ],
+    });
+
+    expect(next.works[0]).toMatchObject({
+      categoryId: movieChildCategory.id,
+      finalScore: 9,
+    });
+    expect(next.works[0].ratingDimensions).toEqual([
+      {
+        id: "scene",
+        name: "画面",
+        score: 9,
+        weight: 2,
+      },
+    ]);
+    expect(
+      next.rankings.find((ranking) => ranking.id === createdRanking.ranking.id)
+        ?.workIds,
+    ).toEqual([]);
+    expect(
+      next.rankings.find(
+        (ranking) => ranking.id === createdMovieRanking.ranking.id,
+      )?.workIds,
+    ).toEqual([createdWork.work.id]);
+    expect(next.tierLists[0].levels[0].workIds).toEqual([]);
+  });
+
   it("updates rating dimensions and recalculates the final score", () => {
     vi.setSystemTime(new Date("2026-05-05T02:25:00.000Z"));
 
