@@ -3,3 +3,4 @@ dist/
 dist-electron/
 coverage/
 android/app/src/main/assets/
+origin/
