@@ -868,6 +868,10 @@ select:disabled {
   gap: 10px;
 }
 
+.ranking-toolbar-inline {
+  margin-top: 4px;
+}
+
 .toolbar-field {
   min-height: 42px;
   border: 1px solid #e2e8f0;
@@ -1689,8 +1693,8 @@ select:disabled {
 }
 
 .score-bar-track {
-  height: 10px;
-  border-radius: 999px;
+  height: 8px;
+  border-radius: 4px;
   background: #e2e8f0;
   overflow: hidden;
 }
@@ -1912,15 +1916,11 @@ select:disabled {
 
 .tier-work-copy {
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 
 .tier-work-copy strong {
   overflow-wrap: anywhere;
-}
-
-.tier-work-copy select {
-  min-height: 36px;
 }
 
 .center-state {

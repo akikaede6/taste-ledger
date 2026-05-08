@@ -1622,49 +1622,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   )}
                 </select>
               </div>
-
-              <div className="toolbar-field">
-                <span>排序维度</span>
-                <select
-                  aria-label="排序维度类型"
-                  value={rankingPreviewMode}
-                  onChange={(event) => {
-                    const mode = event.currentTarget.value as ScoreRankingMode;
-                    setRankingPreviewMode(mode);
-                    if (mode !== "dimension") {
-                      setRankingPreviewDimensionId("");
-                    }
-                  }}
-                >
-                  <option value="finalScore">综合评分</option>
-                  <option value="dimension">单个评分维度</option>
-                </select>
-              </div>
-
-              <div className="toolbar-field">
-                <span>评分维度</span>
-                <select
-                  aria-label="评分维度"
-                  value={selectedRankingPreviewDimensionId ?? ""}
-                  onChange={(event) =>
-                    setRankingPreviewDimensionId(event.currentTarget.value)
-                  }
-                  disabled={
-                    rankingPreviewMode !== "dimension" ||
-                    rankingDimensionOptions.length === 0
-                  }
-                >
-                  {rankingDimensionOptions.length > 0 ? (
-                    rankingDimensionOptions.map((dimension) => (
-                      <option key={dimension.id} value={dimension.id}>
-                        {dimension.name}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">暂无可用评分维度</option>
-                  )}
-                </select>
-              </div>
             </section>
 
             {rankingSurfaceMode === "tier" ? (
@@ -1759,6 +1716,13 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   coverImageUrls={sharedCoverImageUrls}
                   onOpenWork={handleOpenWorkDetail}
                   onExport={handleExportRankingPreview}
+                  onModeChange={(mode) => {
+                    setRankingPreviewMode(mode);
+                    if (mode !== "dimension") {
+                      setRankingPreviewDimensionId("");
+                    }
+                  }}
+                  onDimensionChange={setRankingPreviewDimensionId}
                 />
               </section>
             )}
@@ -2697,6 +2661,8 @@ interface RankingPreviewPanelProps {
   coverImageUrls: Map<string, string>;
   onOpenWork(workId: string): void;
   onExport(): Promise<void> | void;
+  onModeChange(mode: ScoreRankingMode): void;
+  onDimensionChange(dimensionId: string): void;
 }
 
 function RankingPreviewPanel({
@@ -2709,6 +2675,8 @@ function RankingPreviewPanel({
   coverImageUrls,
   onOpenWork,
   onExport,
+  onModeChange,
+  onDimensionChange,
 }: RankingPreviewPanelProps) {
   const [isExporting, setIsExporting] = useState(false);
   const canExport =
@@ -2754,6 +2722,46 @@ function RankingPreviewPanel({
           {isExporting ? "导出中" : "导出排名图"}
         </button>
       </div>
+
+      <section
+        className="ranking-toolbar ranking-toolbar-inline"
+        aria-label="分值排名筛选"
+      >
+        <div className="toolbar-field">
+          <span>排序维度</span>
+          <select
+            aria-label="排序维度类型"
+            value={mode}
+            onChange={(event) => {
+              const nextMode = event.currentTarget.value as ScoreRankingMode;
+              onModeChange(nextMode);
+            }}
+          >
+            <option value="finalScore">综合评分</option>
+            <option value="dimension">单个评分维度</option>
+          </select>
+        </div>
+
+        <div className="toolbar-field">
+          <span>评分维度</span>
+          <select
+            aria-label="评分维度"
+            value={selectedDimensionId ?? ""}
+            onChange={(event) => onDimensionChange(event.currentTarget.value)}
+            disabled={mode !== "dimension" || dimensionOptions.length === 0}
+          >
+            {dimensionOptions.length > 0 ? (
+              dimensionOptions.map((dimension) => (
+                <option key={dimension.id} value={dimension.id}>
+                  {dimension.name}
+                </option>
+              ))
+            ) : (
+              <option value="">暂无可用评分维度</option>
+            )}
+          </select>
+        </div>
+      </section>
 
       {mode === "dimension" && dimensionOptions.length === 0 ? (
         <p className="inline-hint">先添加评分维度，再按单个维度排名。</p>
@@ -3028,13 +3036,9 @@ function TierListEditor({
                 key={work.id}
                 work={work}
                 coverImageUrl={coverImageUrls.get(work.id) ?? null}
-                levels={levelDrafts}
-                currentLevelId={null}
                 isDragging={draggedWorkId === work.id}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
-                onMoveWork={onMoveWork}
-                onRemoveWork={onRemoveWork}
               />
             ))}
           </div>
@@ -3070,13 +3074,9 @@ function TierListEditor({
                       key={work.id}
                       work={work}
                       coverImageUrl={coverImageUrls.get(work.id) ?? null}
-                      levels={levelDrafts}
-                      currentLevelId={level.id}
                       isDragging={draggedWorkId === work.id}
                       onDragStart={handleDragStart}
                       onDragEnd={handleDragEnd}
-                      onMoveWork={onMoveWork}
-                      onRemoveWork={onRemoveWork}
                     />
                   ))}
                 </div>
@@ -3094,25 +3094,17 @@ function TierListEditor({
 interface TierWorkCardProps {
   work: Work;
   coverImageUrl: string | null;
-  levels: TierList["levels"];
-  currentLevelId: TierLevelId | null;
   isDragging: boolean;
   onDragStart(workId: string, event: DragEvent<HTMLElement>): void;
   onDragEnd(): void;
-  onMoveWork(workId: string, levelId: TierLevelId): Promise<void>;
-  onRemoveWork(workId: string): Promise<void>;
 }
 
 function TierWorkCard({
   work,
   coverImageUrl,
-  levels,
-  currentLevelId,
   isDragging,
   onDragStart,
   onDragEnd,
-  onMoveWork,
-  onRemoveWork,
 }: TierWorkCardProps) {
   return (
     <article
@@ -3132,27 +3124,6 @@ function TierWorkCard({
       </div>
       <div className="tier-work-copy">
         <strong>{work.title}</strong>
-        <select
-          aria-label={`移动 ${work.title}`}
-          value={currentLevelId ?? ""}
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-
-            if (value === "") {
-              void onRemoveWork(work.id);
-              return;
-            }
-
-            void onMoveWork(work.id, value as TierLevelId);
-          }}
-        >
-          <option value="">未分级</option>
-          {levels.map((level) => (
-            <option key={level.id} value={level.id}>
-              {level.name}
-            </option>
-          ))}
-        </select>
       </div>
     </article>
   );

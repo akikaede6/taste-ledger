@@ -46,14 +46,14 @@ jobs:
           - target: android
             runner: ubuntu-latest
             build_script: android:build
-            artifact_name: ranking-android-debug-apk
+            artifact_name: taste-ledger-android-debug-apk
             artifact_path: android/app/build/outputs/apk/debug/app-debug.apk
             setup_java: true
             setup_android: true
           - target: linux
             runner: ubuntu-latest
             build_script: electron:build
-            artifact_name: ranking-linux
+            artifact_name: taste-ledger-linux
             artifact_path: |
               dist-electron/*.AppImage
               dist-electron/*.tar.gz
@@ -62,14 +62,16 @@ jobs:
           - target: windows
             runner: windows-latest
             build_script: electron:build
-            artifact_name: ranking-windows-installer
-            artifact_path: dist-electron/*.exe
+            artifact_name: taste-ledger-windows
+            artifact_path: |
+              dist-electron/*.exe
+              dist-electron/*.zip
             setup_java: false
             setup_android: false
           - target: macos
             runner: macos-latest
             build_script: electron:build
-            artifact_name: ranking-macos-dmg
+            artifact_name: taste-ledger-macos-dmg
             artifact_path: dist-electron/*.dmg
             setup_java: false
             setup_android: false
@@ -123,7 +125,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: ranking-*
+          pattern: taste-ledger-*
           path: release-assets
 
       - name: Create release
@@ -143,6 +145,7 @@ jobs:
               -name '*.AppImage' -o \
               -name '*.tar.gz' -o \
               -name '*.exe' -o \
+              -name '*.zip' -o \
               -name '*.dmg' \
             \) -print0
           )

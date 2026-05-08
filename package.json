@@ -71,7 +71,9 @@
     },
     "win": {
       "target": [
-        "nsis"
+        "nsis",
+        "portable",
+        "zip"
       ]
     },
     "mac": {

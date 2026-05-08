@@ -316,8 +316,14 @@ describe("app workflow", () => {
     fireEvent.drop(dropA, { dataTransfer: dataTransferA });
     fireEvent.dragEnd(workA);
     await waitFor(() => {
-      expect(screen.getByLabelText("移动 作品 A")).toHaveValue("tier-1");
+      expect(
+        within(screen.getByRole("region", { name: "等级 神作" })).getByRole(
+          "article",
+          { name: "拖动 作品 A" },
+        ),
+      ).toBeInTheDocument();
     });
+    expect(screen.queryByLabelText("移动 作品 A")).not.toBeInTheDocument();
 
     const dataTransferB = createDataTransfer();
     const workB = screen.getByRole("article", { name: "拖动 作品 B" });
@@ -328,8 +334,14 @@ describe("app workflow", () => {
     fireEvent.drop(dropB, { dataTransfer: dataTransferB });
     fireEvent.dragEnd(workB);
     await waitFor(() => {
-      expect(screen.getByLabelText("移动 作品 B")).toHaveValue("tier-2");
+      expect(
+        within(screen.getByRole("region", { name: "等级 不错" })).getByRole(
+          "article",
+          { name: "拖动 作品 B" },
+        ),
+      ).toBeInTheDocument();
     });
+    expect(screen.queryByLabelText("移动 作品 B")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "导出分级图" }));
     expect(

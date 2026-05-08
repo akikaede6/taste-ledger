@@ -360,14 +360,82 @@ export function createTierListPreviewShareImage(
 }
 
 export function renderWorkShareSvg(payload: WorkSharePayload): string {
-  const shortReviewLines = payload.shortReview
-    ? wrapText(payload.shortReview, 28)
-    : [];
-  const longReviewLines =
-    payload.variant === "long" && payload.longReview
-      ? wrapParagraphs(payload.longReview, 32)
-      : [];
+  if (payload.variant === "cover") {
+    const reviewLines = payload.shortReview
+      ? wrapText(payload.shortReview, 16).slice(0, 3)
+      : ["尚未填写短评"];
+    const scoreLabel =
+      payload.finalScore === null ? "未评分" : `${payload.finalScore}`;
+    const coverLabel = payload.coverImagePath
+      ? `封面已入库: ${payload.coverImagePath}`
+      : "未设置封面";
+    const parts: string[] = [
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${IMAGE_WIDTH}" height="1440" viewBox="0 0 ${IMAGE_WIDTH} 1440" role="img" aria-label="${escapeXml(
+        payload.title,
+      )}">`,
+      `<defs>
+        <linearGradient id="work-cover-shade" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stop-color="#0f172a" stop-opacity="0"/>
+          <stop offset="46%" stop-color="#0f172a" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#0f172a" stop-opacity="0.92"/>
+        </linearGradient>
+      </defs>`,
+      `<rect width="${IMAGE_WIDTH}" height="1440" fill="#0f172a"/>`,
+    ];
 
+    if (payload.coverDataUrl) {
+      parts.push(
+        `<image href="${escapeXml(payload.coverDataUrl)}" x="0" y="0" width="${IMAGE_WIDTH}" height="1440" preserveAspectRatio="xMidYMid slice"/>`,
+      );
+    } else {
+      parts.push(
+        `<rect width="${IMAGE_WIDTH}" height="1440" fill="#e2e8f0"/>`,
+        `<text x="540" y="680" fill="#475569" font-family="system-ui, sans-serif" font-size="38" font-weight="800" text-anchor="middle">${escapeXml(
+          coverLabel,
+        )}</text>`,
+      );
+    }
+
+    parts.push(
+      `<rect width="${IMAGE_WIDTH}" height="1440" fill="url(#work-cover-shade)"/>`,
+      `<rect x="72" y="72" width="184" height="48" rx="24" fill="#ffffff" opacity="0.92"/>`,
+      `<text x="164" y="104" fill="#0f172a" font-family="system-ui, sans-serif" font-size="24" font-weight="900" text-anchor="middle">Taste Ledger</text>`,
+      `<rect x="276" y="72" width="172" height="48" rx="24" fill="#ffffff" opacity="0.18"/>`,
+      `<text x="362" y="104" fill="#ffffff" font-family="system-ui, sans-serif" font-size="24" font-weight="800" text-anchor="middle">${escapeXml(
+        payload.categoryName,
+      )}</text>`,
+      `<rect x="72" y="1068" width="132" height="44" rx="8" fill="#dc2626"/>`,
+      `<text x="138" y="1098" fill="#ffffff" font-family="system-ui, sans-serif" font-size="24" font-weight="900" text-anchor="middle">SCORE</text>`,
+      `<rect x="220" y="1068" width="124" height="44" rx="8" fill="#ffffff" opacity="0.18"/>`,
+      `<text x="282" y="1098" fill="#ffffff" font-family="system-ui, sans-serif" font-size="28" font-weight="900" text-anchor="middle">${escapeXml(
+        scoreLabel,
+      )}</text>`,
+    );
+
+    reviewLines.forEach((line, index) => {
+      parts.push(
+        `<text x="72" y="${1182 + index * 64}" fill="#ffffff" font-family="system-ui, sans-serif" font-size="52" font-weight="900">${escapeXml(
+          line,
+        )}</text>`,
+      );
+    });
+
+    parts.push(
+      `<line x1="72" y1="1370" x2="1008" y2="1370" stroke="#ffffff" stroke-opacity="0.24" stroke-width="2"/>`,
+      `<text x="72" y="1408" fill="#ffffff" fill-opacity="0.84" font-family="system-ui, sans-serif" font-size="22" font-weight="800">Taste Ledger Review</text>`,
+      `<text x="1008" y="1408" fill="#ffffff" fill-opacity="0.84" font-family="system-ui, sans-serif" font-size="22" font-weight="800" text-anchor="end">${escapeXml(
+        payload.categoryName,
+      )}</text>`,
+      `</svg>`,
+    );
+
+    return parts.join("");
+  }
+
+  const longReviewLines =
+    payload.longReview && payload.longReview.trim()
+      ? wrapParagraphs(payload.longReview, 31)
+      : [];
   const scoreLabel =
     payload.finalScore === null ? "未评分" : `${payload.finalScore} 分`;
   const coverLabel = payload.coverImagePath
@@ -379,151 +447,113 @@ export function renderWorkShareSvg(payload: WorkSharePayload): string {
     score: dimension.score,
     weight: dimension.weight,
   }));
-  const dimensionGridRows = Math.max(1, Math.ceil(dimensions.length / 2));
-  const coverHeight = payload.variant === "cover" ? 640 : 520;
-  const estimatedHeight =
-    168 +
-    coverHeight +
-    128 +
-    (dimensions.length > 0 ? 72 + dimensionGridRows * 96 + 16 : 0) +
-    (longReviewLines.length > 0 ? 88 + longReviewLines.length * 32 : 0);
-  const height = Math.max(1240, estimatedHeight);
-
+  const dimensionHeight =
+    dimensions.length > 0 ? 92 + dimensions.length * 74 : 0;
+  const reviewHeight =
+    longReviewLines.length > 0 ? 124 + longReviewLines.length * 34 : 0;
+  const coverHeight = 480;
+  const height = Math.max(1420, 864 + dimensionHeight + reviewHeight);
   const parts: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${IMAGE_WIDTH}" height="${height}" viewBox="0 0 ${IMAGE_WIDTH} ${height}" role="img" aria-label="${escapeXml(
       payload.title,
     )}">`,
     `<rect width="${IMAGE_WIDTH}" height="${height}" fill="#f4f7fb"/>`,
-    `<rect x="40" y="40" width="1000" height="${height - 80}" rx="40" fill="#ffffff" stroke="#dbe3ef" stroke-width="2"/>`,
-    `<rect x="${TEXT_LEFT}" y="76" width="180" height="44" rx="22" fill="#eff6ff"/>`,
-    `<text x="202" y="106" fill="#1d4ed8" font-family="system-ui, sans-serif" font-size="26" font-weight="800" text-anchor="middle">${escapeXml(
-      payload.categoryName,
-    )}</text>`,
-    `<rect x="314" y="76" width="156" height="44" rx="22" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>`,
-    `<text x="392" y="106" fill="#475569" font-family="system-ui, sans-serif" font-size="24" font-weight="800" text-anchor="middle">Taste Ledger</text>`,
-    `<rect x="828" y="76" width="164" height="44" rx="22" fill="#0f172a"/>`,
-    `<text x="910" y="106" fill="#ffffff" font-family="system-ui, sans-serif" font-size="26" font-weight="800" text-anchor="middle">${escapeXml(
-      scoreLabel,
-    )}</text>`,
+    `<rect x="52" y="52" width="976" height="${height - 104}" rx="22" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>`,
+    `<text x="540" y="112" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="18" font-weight="900" text-anchor="middle">TASTE LEDGER RECOMMENDATION</text>`,
+    `<text x="540" y="166" fill="#0f172a" font-family="system-ui, sans-serif" font-size="46" font-weight="900" text-anchor="middle">作品深度解析报告</text>`,
   ];
 
-  let cursor = 160;
+  let cursor = 220;
   parts.push(
-    `<rect x="${TEXT_LEFT}" y="${cursor}" width="936" height="${coverHeight}" rx="34" fill="#e2e8f0"/>`,
+    `<rect x="${TEXT_LEFT}" y="${cursor}" width="856" height="${coverHeight}" rx="14" fill="#e2e8f0"/>`,
   );
 
   if (payload.coverDataUrl) {
     parts.push(
-      `<image href="${escapeXml(payload.coverDataUrl)}" x="${TEXT_LEFT}" y="${cursor}" width="936" height="${coverHeight}" preserveAspectRatio="xMidYMid slice"/>`,
+      `<image href="${escapeXml(payload.coverDataUrl)}" x="${TEXT_LEFT}" y="${cursor}" width="856" height="${coverHeight}" preserveAspectRatio="xMidYMid slice"/>`,
     );
   } else {
     parts.push(
-      `<rect x="${TEXT_LEFT}" y="${cursor}" width="936" height="${coverHeight}" rx="34" fill="#e2e8f0"/>`,
-      `<text x="540" y="${cursor + coverHeight / 2 - 12}" fill="#475569" font-family="system-ui, sans-serif" font-size="34" font-weight="800" text-anchor="middle">${escapeXml(
+      `<text x="540" y="${cursor + 248}" fill="#475569" font-family="system-ui, sans-serif" font-size="30" font-weight="800" text-anchor="middle">${escapeXml(
         coverLabel,
       )}</text>`,
     );
   }
 
-  if (shortReviewLines.length > 0) {
-    const overlayTop = cursor + coverHeight - 160;
-    const visibleLines = shortReviewLines.slice(0, 3);
-
-    parts.push(
-      `<rect x="${TEXT_LEFT}" y="${overlayTop - 24}" width="936" height="188" rx="0" fill="#0f172a" opacity="${
-        payload.coverDataUrl ? "0.68" : "0.54"
-      }"/>`,
-    );
-    parts.push(
-      `<text x="${TEXT_LEFT + 32}" y="${overlayTop + 46}" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="22" font-weight="800">短评</text>`,
-    );
-
-    visibleLines.forEach((line, index) => {
-      parts.push(
-        `<text x="${TEXT_LEFT + 32}" y="${overlayTop + 84 + index * 28}" fill="#ffffff" font-family="system-ui, sans-serif" font-size="26" font-weight="700">${escapeXml(
-          line,
-        )}</text>`,
-      );
-    });
-  }
-
-  cursor += coverHeight + 28;
+  cursor += 528;
   parts.push(
-    `<g>
-      <rect x="${TEXT_LEFT}" y="${cursor}" width="456" height="92" rx="24" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
-      <text x="${TEXT_LEFT + 28}" y="${cursor + 30}" fill="#64748b" font-family="system-ui, sans-serif" font-size="22" font-weight="800">综合评分</text>
-      <text x="${TEXT_LEFT + 28}" y="${cursor + 68}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="40" font-weight="900">${escapeXml(
-        scoreLabel,
-      )}</text>
-      <rect x="592" y="${cursor}" width="456" height="92" rx="24" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
-      <text x="620" y="${cursor + 30}" fill="#64748b" font-family="system-ui, sans-serif" font-size="22" font-weight="800">评分维度</text>
-      <text x="620" y="${cursor + 68}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="40" font-weight="900">${escapeXml(
-        `${dimensions.length}`,
-      )}</text>
-    </g>`,
+    `<rect x="${TEXT_LEFT}" y="${cursor}" width="268" height="74" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>`,
+    `<text x="${TEXT_LEFT + 22}" y="${cursor + 28}" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="18" font-weight="900">综合评分</text>`,
+    `<text x="${TEXT_LEFT + 22}" y="${cursor + 58}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="30" font-weight="900">${escapeXml(
+      scoreLabel,
+    )}</text>`,
+    `<rect x="406" y="${cursor}" width="268" height="74" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>`,
+    `<text x="428" y="${cursor + 28}" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="18" font-weight="900">分类</text>`,
+    `<text x="428" y="${cursor + 58}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="28" font-weight="900">${escapeXml(
+      payload.categoryName,
+    )}</text>`,
+    `<rect x="700" y="${cursor}" width="268" height="74" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>`,
+    `<text x="722" y="${cursor + 28}" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="18" font-weight="900">评分维度</text>`,
+    `<text x="722" y="${cursor + 58}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="30" font-weight="900">${escapeXml(
+      `${dimensions.length}`,
+    )}</text>`,
   );
 
-  cursor += 124;
+  cursor += 122;
 
   if (dimensions.length > 0) {
-    const columns = 2;
-    const cardWidth = 432;
-    const cardHeight = 88;
-    const gapX = 24;
-    const gapY = 14;
-    const gridRows = Math.ceil(dimensions.length / columns);
-
     parts.push(
-      `<text x="${TEXT_LEFT}" y="${cursor}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="34" font-weight="800">评分维度</text>`,
+      `<text x="${TEXT_LEFT}" y="${cursor}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="30" font-weight="900">维度评分</text>`,
     );
-    cursor += 28;
+    cursor += 36;
 
     dimensions.forEach((dimension, index) => {
-      const column = index % columns;
-      const row = Math.floor(index / columns);
-      const x = TEXT_LEFT + column * (cardWidth + gapX);
-      const y = cursor + row * (cardHeight + gapY);
+      const y = cursor + index * 74;
       const scoreWidth = Math.max(
         0,
         Math.min(100, Math.round(dimension.score * 10)),
       );
 
       parts.push(
-        `<rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" rx="20" fill="#ffffff" stroke="#dbe3ef" stroke-width="1.5"/>`,
-        `<text x="${x + 18}" y="${y + 30}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="24" font-weight="800">${escapeXml(
+        `<text x="${TEXT_LEFT}" y="${y + 18}" fill="#475569" font-family="system-ui, sans-serif" font-size="22" font-weight="800">${escapeXml(
           dimension.name,
         )}</text>`,
-        `<text x="${x + cardWidth - 18}" y="${y + 30}" fill="#64748b" font-family="system-ui, sans-serif" font-size="18" font-weight="800" text-anchor="end">${escapeXml(
+        `<text x="968" y="${y + 18}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="22" font-weight="900" text-anchor="end">${escapeXml(
           `${dimension.score} · 权重 ${dimension.weight}`,
         )}</text>`,
-        `<rect x="${x + 18}" y="${y + 46}" width="${cardWidth - 36}" height="10" rx="999" fill="#e2e8f0"/>`,
-        `<rect x="${x + 18}" y="${y + 46}" width="${((cardWidth - 36) * scoreWidth) / 100}" height="10" rx="999" fill="#0f766e"/>`,
+        `<rect x="${TEXT_LEFT}" y="${y + 38}" width="856" height="4" rx="2" fill="#e2e8f0"/>`,
+        `<rect x="${TEXT_LEFT}" y="${y + 38}" width="${(856 * scoreWidth) / 100}" height="4" rx="2" fill="#0f172a"/>`,
       );
     });
 
-    cursor += gridRows * cardHeight + Math.max(0, gridRows - 1) * 14 + 24;
+    cursor += dimensions.length * 74 + 24;
   }
 
   if (longReviewLines.length > 0) {
     parts.push(
-      `<text x="${TEXT_LEFT}" y="${cursor}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="34" font-weight="800">长评</text>`,
+      `<text x="${TEXT_LEFT}" y="${cursor}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="30" font-weight="900">深度评测</text>`,
     );
-    cursor += 28;
+    cursor += 36;
 
     parts.push(
-      `<rect x="${TEXT_LEFT}" y="${cursor}" width="936" height="${longReviewLines.length * 32 + 32}" rx="24" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>`,
+      `<rect x="${TEXT_LEFT}" y="${cursor}" width="856" height="${longReviewLines.length * 34 + 44}" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>`,
     );
 
     longReviewLines.forEach((line, index) => {
       parts.push(
-        `<text x="${TEXT_LEFT + 28}" y="${cursor + 42 + index * 32}" fill="#334155" font-family="system-ui, sans-serif" font-size="24" font-weight="500">${escapeXml(
+        `<text x="${TEXT_LEFT + 24}" y="${cursor + 40 + index * 34}" fill="#334155" font-family="system-ui, sans-serif" font-size="24" font-weight="500">${escapeXml(
           line,
         )}</text>`,
       );
     });
 
-    cursor += longReviewLines.length * 32 + 56;
+    cursor += longReviewLines.length * 34 + 70;
   }
+
+  parts.push(
+    `<line x1="${TEXT_LEFT}" y1="${height - 110}" x2="968" y2="${height - 110}" stroke="#e2e8f0" stroke-width="2"/>`,
+    `<text x="540" y="${height - 70}" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="18" font-weight="800" text-anchor="middle">Taste Ledger © Local Rating Archive</text>`,
+  );
 
   parts.push("</svg>");
 
@@ -640,75 +670,57 @@ export function renderRankingShareSvg(payload: RankingSharePayload): string {
 export function renderTierListShareSvg(payload: TierListSharePayload): string {
   const renderedLevels = payload.levels.map((level) => ({
     ...level,
-    rowCount: Math.max(1, Math.ceil(level.items.length / 5)),
+    rowCount: Math.max(1, Math.ceil(level.items.length / 6)),
   }));
-  const levelHeights = renderedLevels.map((level) => {
-    return Math.max(
-      240,
-      108 + level.rowCount * 176 + Math.max(0, level.rowCount - 1) * 16,
-    );
-  });
+  const cardWidth = 108;
+  const cardHeight = 144;
+  const gapX = 12;
+  const gapY = 12;
+  const levelHeights = renderedLevels.map((level) =>
+    Math.max(
+      196,
+      82 + level.rowCount * cardHeight + Math.max(0, level.rowCount - 1) * gapY,
+    ),
+  );
   const rowsHeight =
     levelHeights.reduce((sum, height) => sum + height, 0) +
-    Math.max(0, renderedLevels.length - 1) * 14;
-  const height = Math.max(960, 256 + rowsHeight + 112);
+    Math.max(0, renderedLevels.length - 1) * 8;
+  const height = Math.max(1180, 224 + rowsHeight + 96);
   const parts: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${IMAGE_WIDTH}" height="${height}" viewBox="0 0 ${IMAGE_WIDTH} ${height}" role="img" aria-label="${escapeXml(
       payload.tierListName,
     )}">`,
-    `<rect width="${IMAGE_WIDTH}" height="${height}" fill="#f4f7fb"/>`,
-    `<rect x="40" y="40" width="1000" height="${height - 80}" rx="40" fill="#ffffff" stroke="#dbe3ef" stroke-width="2"/>`,
-    `<rect x="${TEXT_LEFT}" y="76" width="180" height="44" rx="22" fill="#eff6ff"/>`,
-    `<text x="202" y="106" fill="#1d4ed8" font-family="system-ui, sans-serif" font-size="26" font-weight="800" text-anchor="middle">${escapeXml(
-      payload.categoryName,
-    )}</text>`,
-    `<rect x="314" y="76" width="156" height="44" rx="22" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>`,
-    `<text x="392" y="106" fill="#475569" font-family="system-ui, sans-serif" font-size="24" font-weight="800" text-anchor="middle">Taste Ledger</text>`,
-    `<rect x="828" y="76" width="164" height="44" rx="22" fill="#0f172a"/>`,
-    `<text x="910" y="106" fill="#ffffff" font-family="system-ui, sans-serif" font-size="26" font-weight="800" text-anchor="middle">${escapeXml(
+    `<rect width="${IMAGE_WIDTH}" height="${height}" fill="#f8fafc"/>`,
+    `<rect x="48" y="48" width="984" height="${height - 96}" rx="28" fill="#0f172a"/>`,
+    `<text x="88" y="116" fill="#ffffff" font-family="system-ui, sans-serif" font-size="46" font-weight="900">荣誉殿堂</text>`,
+    `<text x="88" y="154" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="24" font-weight="800">${escapeXml(
+      payload.tierListName,
+    )} · ${escapeXml(payload.categoryName)}</text>`,
+    `<rect x="848" y="92" width="136" height="44" rx="8" fill="#ffffff"/>`,
+    `<text x="916" y="122" fill="#0f172a" font-family="system-ui, sans-serif" font-size="22" font-weight="900" text-anchor="middle">${escapeXml(
       `${payload.levels.length} 级`,
     )}</text>`,
+    `<text x="984" y="164" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="18" font-weight="800" text-anchor="end">Taste Ledger</text>`,
   ];
 
-  let cursor = 160;
-  parts.push(
-    `<text x="${TEXT_LEFT}" y="${cursor}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="56" font-weight="900">${escapeXml(
-      payload.tierListName,
-    )}</text>`,
-  );
-
-  cursor += 48;
-  parts.push(
-    `<text x="${TEXT_LEFT}" y="${cursor}" fill="#64748b" font-family="system-ui, sans-serif" font-size="28" font-weight="700">${payload.levels.length} 个等级 · 封面拼贴</text>`,
-  );
-
-  cursor += 72;
+  let cursor = 200;
 
   renderedLevels.forEach((level, index) => {
     const rowHeight = levelHeights[index];
     const rowTop = cursor;
-    const fill = index % 2 === 0 ? "#f8fafc" : "#ffffff";
     const labelFill = getTierLabelColor(level.id);
-    const cardWidth = 136;
-    const cardHeight = 176;
-    const gapX = 12;
-    const gapY = 16;
-    const columns = 5;
-    const startX = 214;
-    const startY = rowTop + 108;
+    const labelTextFill = getTierLabelTextColor(level.id);
+    const columns = 6;
+    const startX = 236;
+    const startY = rowTop + 26;
 
     parts.push(
-      `<rect x="88" y="${rowTop}" width="904" height="${rowHeight}" rx="24" fill="${fill}" stroke="#e2e8f0" stroke-width="1.5"/>`,
-      `<rect x="112" y="${rowTop + 20}" width="70" height="${rowHeight - 40}" rx="18" fill="${labelFill}"/>`,
-      `<text x="147" y="${rowTop + rowHeight / 2 + 10}" fill="#ffffff" font-family="system-ui, sans-serif" font-size="28" font-weight="900" text-anchor="middle">${escapeXml(
+      `<rect x="88" y="${rowTop}" width="904" height="${rowHeight}" rx="10" fill="#111827"/>`,
+      `<rect x="92" y="${rowTop + 4}" width="120" height="${rowHeight - 8}" rx="6" fill="${labelFill}"/>`,
+      `<text x="152" y="${rowTop + rowHeight / 2 + 10}" fill="${labelTextFill}" font-family="system-ui, sans-serif" font-size="34" font-weight="900" font-style="italic" text-anchor="middle">${escapeXml(
         level.name,
       )}</text>`,
-      `<text x="214" y="${rowTop + 54}" fill="#0f172a" font-family="system-ui, sans-serif" font-size="28" font-weight="800">${escapeXml(
-        `${level.items.length} 个作品`,
-      )}</text>`,
-      `<text x="214" y="${rowTop + 84}" fill="#64748b" font-family="system-ui, sans-serif" font-size="22" font-weight="700">${escapeXml(
-        "封面拼贴",
-      )}</text>`,
+      `<rect x="212" y="${rowTop + 4}" width="776" height="${rowHeight - 8}" rx="6" fill="#ffffff"/>`,
     );
 
     level.items.forEach((item, itemIndex) => {
@@ -718,17 +730,17 @@ export function renderTierListShareSvg(payload: TierListSharePayload): string {
       const y = startY + row * (cardHeight + gapY);
 
       parts.push(
-        `<rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" rx="18" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>`,
-        `<rect x="${x + 8}" y="${y + 8}" width="${cardWidth - 16}" height="${cardHeight - 16}" rx="12" fill="#e2e8f0"/>`,
+        `<rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" rx="7" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>`,
+        `<rect x="${x + 6}" y="${y + 6}" width="${cardWidth - 12}" height="${cardHeight - 12}" rx="5" fill="#e2e8f0"/>`,
       );
 
       if (item.coverDataUrl) {
         parts.push(
-          `<image href="${escapeXml(item.coverDataUrl)}" x="${x + 8}" y="${y + 8}" width="${cardWidth - 16}" height="${cardHeight - 16}" preserveAspectRatio="xMidYMid slice"/>`,
+          `<image href="${escapeXml(item.coverDataUrl)}" x="${x + 6}" y="${y + 6}" width="${cardWidth - 12}" height="${cardHeight - 12}" preserveAspectRatio="xMidYMid slice"/>`,
         );
       } else {
         parts.push(
-          `<text x="${x + cardWidth / 2}" y="${y + 96}" fill="#64748b" font-family="system-ui, sans-serif" font-size="20" font-weight="700" text-anchor="middle">${escapeXml(
+          `<text x="${x + cardWidth / 2}" y="${y + 78}" fill="#64748b" font-family="system-ui, sans-serif" font-size="16" font-weight="700" text-anchor="middle">${escapeXml(
             item.coverImagePath ? "封面未读取" : "未设置封面",
           )}</text>`,
         );
@@ -737,11 +749,11 @@ export function renderTierListShareSvg(payload: TierListSharePayload): string {
 
     if (level.items.length === 0) {
       parts.push(
-        `<text x="${startX}" y="${startY + 70}" fill="#64748b" font-family="system-ui, sans-serif" font-size="22" font-weight="700">暂无作品</text>`,
+        `<text x="${startX}" y="${rowTop + rowHeight / 2 + 8}" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="22" font-weight="800">暂无作品</text>`,
       );
     }
 
-    cursor += rowHeight + 14;
+    cursor += rowHeight + 8;
   });
 
   parts.push("</svg>");
@@ -794,15 +806,30 @@ function getDefaultTierLevelName(levelId: TierLevelId): string {
 function getTierLabelColor(levelId: TierLevelId): string {
   switch (levelId) {
     case "tier-1":
-      return "#0f766e";
+      return "#ff7f7f";
     case "tier-2":
-      return "#2563eb";
+      return "#ffbf7f";
     case "tier-3":
-      return "#7c3aed";
+      return "#ffff7f";
     case "tier-4":
-      return "#ea580c";
+      return "#7fff7f";
     case "tier-5":
-      return "#b91c1c";
+      return "#7fbfff";
+  }
+}
+
+function getTierLabelTextColor(levelId: TierLevelId): string {
+  switch (levelId) {
+    case "tier-1":
+      return "#7f0000";
+    case "tier-2":
+      return "#7f3f00";
+    case "tier-3":
+      return "#7f7f00";
+    case "tier-4":
+      return "#007f00";
+    case "tier-5":
+      return "#003f7f";
   }
 }
 
