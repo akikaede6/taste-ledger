@@ -359,7 +359,7 @@ describe("work share export", () => {
       coverDataUrl: "data:image/png;base64,AAAA",
     });
     expect(svg).toContain("<image");
-    expect(svg).toContain("作品 A");
+    expect(svg).not.toContain("作品 A");
     expect(image.id).toMatch(/^tier-film-tier-\d+$/);
   });
 });

@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import {
   type ChangeEvent,
+  type DragEvent,
   type FormEvent,
   type ReactElement,
   useEffect,
@@ -953,11 +954,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   (work) => work.categoryId === child.category.id,
                 ).length;
                 const selected = state.selectedCategoryId === child.category.id;
-                const childWorks = state.library.works
-                  .filter((work) => work.categoryId === child.category.id)
-                  .sort((left, right) =>
-                    right.updatedAt.localeCompare(left.updatedAt),
-                  );
 
                 return (
                   <div className="category-child-group" key={child.category.id}>
@@ -976,32 +972,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                       </div>
                       <small>{childWorkCount} 作品 · 共用上级设置</small>
                     </button>
-                    {selected && childWorks.length > 0 ? (
-                      <div
-                        className="category-work-list"
-                        aria-label={`${child.category.name} 的作品`}
-                      >
-                        {childWorks.map((work) => (
-                          <button
-                            key={work.id}
-                            className={
-                              work.id === state.selectedWorkId
-                                ? "category-work-button selected"
-                                : "category-work-button"
-                            }
-                            type="button"
-                            onClick={() => handleOpenWorkDetail(work.id)}
-                          >
-                            <span>{work.title}</span>
-                            <small>
-                              {work.finalScore === null
-                                ? "未评分"
-                                : `${work.finalScore} 分`}
-                            </small>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
                   </div>
                 );
               })}
@@ -2865,6 +2835,7 @@ function TierListEditor({
   );
   const [draftError, setDraftError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [draggedWorkId, setDraggedWorkId] = useState<string | null>(null);
   const workById = useMemo(
     () => new Map(works.map((work) => [work.id, work] as const)),
     [works],
@@ -2916,6 +2887,55 @@ function TierListEditor({
     } finally {
       setIsExporting(false);
     }
+  }
+
+  function getDraggedWorkId(event: DragEvent<HTMLElement>): string | null {
+    return (
+      draggedWorkId ||
+      event.dataTransfer.getData("text/plain") ||
+      event.dataTransfer.getData("text") ||
+      null
+    );
+  }
+
+  function handleDragStart(workId: string, event: DragEvent<HTMLElement>) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", workId);
+    event.dataTransfer.setData("text", workId);
+    setDraggedWorkId(workId);
+  }
+
+  function handleDragEnd() {
+    setDraggedWorkId(null);
+  }
+
+  function handleDropToLevel(
+    levelId: TierLevelId,
+    event: DragEvent<HTMLElement>,
+  ) {
+    event.preventDefault();
+    const workId = getDraggedWorkId(event);
+
+    setDraggedWorkId(null);
+
+    if (!workId) {
+      return;
+    }
+
+    void onMoveWork(workId, levelId);
+  }
+
+  function handleDropToUnassigned(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    const workId = getDraggedWorkId(event);
+
+    setDraggedWorkId(null);
+
+    if (!workId) {
+      return;
+    }
+
+    void onRemoveWork(workId);
   }
 
   return (
@@ -2990,7 +3010,11 @@ function TierListEditor({
         ) : null}
       </form>
 
-      <div className="tier-unassigned">
+      <div
+        className="tier-unassigned tier-dropzone"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => handleDropToUnassigned(event)}
+      >
         <div className="tier-section-heading">
           <h4>未分级作品</h4>
           <small>{unassignedWorks.length}</small>
@@ -3006,6 +3030,9 @@ function TierListEditor({
                 coverImageUrl={coverImageUrls.get(work.id) ?? null}
                 levels={levelDrafts}
                 currentLevelId={null}
+                isDragging={draggedWorkId === work.id}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
                 onMoveWork={onMoveWork}
                 onRemoveWork={onRemoveWork}
               />
@@ -3024,7 +3051,14 @@ function TierListEditor({
           });
 
           return (
-            <section className="tier-row" key={level.id}>
+            <section
+              className="tier-row tier-dropzone"
+              key={level.id}
+              role="region"
+              aria-label={`等级 ${level.name}`}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => handleDropToLevel(level.id, event)}
+            >
               <div className={`tier-level-label ${level.id}`}>
                 <strong>{level.name}</strong>
                 <small>{levelWorks.length}</small>
@@ -3038,6 +3072,9 @@ function TierListEditor({
                       coverImageUrl={coverImageUrls.get(work.id) ?? null}
                       levels={levelDrafts}
                       currentLevelId={level.id}
+                      isDragging={draggedWorkId === work.id}
+                      onDragStart={handleDragStart}
+                      onDragEnd={handleDragEnd}
                       onMoveWork={onMoveWork}
                       onRemoveWork={onRemoveWork}
                     />
@@ -3059,6 +3096,9 @@ interface TierWorkCardProps {
   coverImageUrl: string | null;
   levels: TierList["levels"];
   currentLevelId: TierLevelId | null;
+  isDragging: boolean;
+  onDragStart(workId: string, event: DragEvent<HTMLElement>): void;
+  onDragEnd(): void;
   onMoveWork(workId: string, levelId: TierLevelId): Promise<void>;
   onRemoveWork(workId: string): Promise<void>;
 }
@@ -3068,11 +3108,21 @@ function TierWorkCard({
   coverImageUrl,
   levels,
   currentLevelId,
+  isDragging,
+  onDragStart,
+  onDragEnd,
   onMoveWork,
   onRemoveWork,
 }: TierWorkCardProps) {
   return (
-    <article className="tier-work-card">
+    <article
+      className={isDragging ? "tier-work-card dragging" : "tier-work-card"}
+      draggable
+      aria-label={`拖动 ${work.title}`}
+      aria-grabbed={isDragging}
+      onDragStart={(event) => onDragStart(work.id, event)}
+      onDragEnd={onDragEnd}
+    >
       <div className="tier-work-cover">
         {coverImageUrl ? (
           <img src={coverImageUrl} alt="" />

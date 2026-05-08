@@ -2,6 +2,7 @@ const {
   app,
   BrowserWindow,
   clipboard,
+  Menu,
   dialog,
   ipcMain,
   nativeImage,
@@ -46,7 +47,7 @@ ipcMain.handle("taste-ledger-shell:choose-storage-directory", async () => {
     return null;
   }
 
-  currentDataRoot = selectedRoot;
+  currentDataRoot = resolveTasteLedgerRoot(selectedRoot);
   await fs.mkdir(currentDataRoot, { recursive: true });
   await writeStorageConfig(currentDataRoot);
 
@@ -170,6 +171,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null);
   await initializeDataRoot();
   createWindow();
 
@@ -211,11 +213,7 @@ function getDataRoot() {
 }
 
 function getDefaultDataRoot() {
-  return path.join(
-    app.getPath("documents"),
-    "Taste Ledger",
-    "taste-ledger-data",
-  );
+  return path.join(app.getPath("documents"), "Taste-ledger");
 }
 
 function getStorageConfigPath() {
@@ -252,6 +250,16 @@ async function writeStorageConfig(dataRoot) {
     `${JSON.stringify({ dataRoot }, null, 2)}\n`,
     "utf8",
   );
+}
+
+function resolveTasteLedgerRoot(baseDirectory) {
+  const resolved = path.resolve(baseDirectory);
+
+  if (path.basename(resolved) === "Taste-ledger") {
+    return resolved;
+  }
+
+  return path.join(resolved, "Taste-ledger");
 }
 
 async function writeAtomicText(targetPath, content) {

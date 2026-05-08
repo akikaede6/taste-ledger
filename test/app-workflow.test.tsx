@@ -298,21 +298,35 @@ describe("app workflow", () => {
     fireEvent.change(screen.getByLabelText("等级 1"), {
       target: { value: "神作" },
     });
+    fireEvent.change(screen.getByLabelText("等级 2"), {
+      target: { value: "不错" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "保存分级" }));
     await waitFor(() => {
       expect(screen.getByLabelText("等级 1")).toHaveValue("神作");
+      expect(screen.getByLabelText("等级 2")).toHaveValue("不错");
     });
 
-    fireEvent.change(screen.getByLabelText("移动 作品 A"), {
-      target: { value: "tier-1" },
-    });
+    const dataTransferA = createDataTransfer();
+    const workA = screen.getByRole("article", { name: "拖动 作品 A" });
+    const dropA = screen.getByRole("region", { name: "等级 神作" });
+
+    fireEvent.dragStart(workA, { dataTransfer: dataTransferA });
+    fireEvent.dragOver(dropA, { dataTransfer: dataTransferA });
+    fireEvent.drop(dropA, { dataTransfer: dataTransferA });
+    fireEvent.dragEnd(workA);
     await waitFor(() => {
       expect(screen.getByLabelText("移动 作品 A")).toHaveValue("tier-1");
     });
 
-    fireEvent.change(screen.getByLabelText("移动 作品 B"), {
-      target: { value: "tier-2" },
-    });
+    const dataTransferB = createDataTransfer();
+    const workB = screen.getByRole("article", { name: "拖动 作品 B" });
+    const dropB = screen.getByRole("region", { name: "等级 不错" });
+
+    fireEvent.dragStart(workB, { dataTransfer: dataTransferB });
+    fireEvent.dragOver(dropB, { dataTransfer: dataTransferB });
+    fireEvent.drop(dropB, { dataTransfer: dataTransferB });
+    fireEvent.dragEnd(workB);
     await waitFor(() => {
       expect(screen.getByLabelText("移动 作品 B")).toHaveValue("tier-2");
     });
@@ -389,6 +403,28 @@ function getWorkButton(name: string | RegExp) {
   return within(screen.getByLabelText("作品列表")).getByRole("button", {
     name,
   });
+}
+
+function createDataTransfer() {
+  const data = new Map<string, string>();
+
+  return {
+    effectAllowed: "move",
+    setData(type: string, value: string) {
+      data.set(type, value);
+    },
+    getData(type: string) {
+      return data.get(type) ?? "";
+    },
+    clearData(type?: string) {
+      if (type) {
+        data.delete(type);
+        return;
+      }
+
+      data.clear();
+    },
+  } as unknown as DataTransfer;
 }
 
 async function flushUi() {
