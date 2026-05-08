@@ -45,6 +45,7 @@ import {
 import { useLibraryState } from "./core/library-store";
 import type {
   Category,
+  Library as TasteLibrary,
   RankingMode,
   RatingDimensionScore,
   RatingDimensionTemplate,
@@ -75,14 +76,6 @@ import {
 import { createRuntimeBackend } from "./platform/runtime-backend";
 import { getDesktopBridge } from "./platform/runtime-bridge";
 
-interface WorkSaveInput {
-  title: string;
-  tags: string[];
-  shortReview: string;
-  longReview: string;
-  ratingDimensions: RatingDimensionScore[];
-}
-
 interface TierListSaveInput {
   name: string;
   levels: TierLevel[];
@@ -102,6 +95,29 @@ interface ExportPreferences {
 
 type ScoreRankingMode = Exclude<RankingMode, "manual">;
 type WorkspaceView = "dashboard" | "work" | "rankings" | "sharing";
+type ActiveModal = "category" | "work" | null;
+type RankingSurfaceMode = "tier" | "score";
+
+interface CategoryModalState {
+  mode: "root" | "child";
+  parentCategoryId: string | null;
+  name: string;
+  dimensionDrafts: RatingTemplateDraft[];
+}
+
+interface WorkModalState {
+  mode: "create" | "edit";
+  workId: string | null;
+  categoryId: string | null;
+  title: string;
+  tagsText: string;
+  shortReview: string;
+  longReview: string;
+  ratingDimensions: RatingDimensionDraft[];
+  coverFileName: string | null;
+  coverBytes: Uint8Array | null;
+  coverPreviewUrl: string | null;
+}
 
 const EXPORT_DIRECTORY_KEY = "taste-ledger:export-directory";
 
@@ -146,16 +162,22 @@ export function App() {
 
 function Workspace({ repository }: { repository: LibraryRepository }) {
   const { state, controller } = useLibraryState(repository);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [newChildCategoryName, setNewChildCategoryName] = useState("");
-  const [newWorkTitle, setNewWorkTitle] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([]);
   const [rankingPreviewMode, setRankingPreviewMode] =
     useState<ScoreRankingMode>("finalScore");
   const [rankingPreviewDimensionId, setRankingPreviewDimensionId] =
     useState("");
+  const [rankingSurfaceMode, setRankingSurfaceMode] =
+    useState<RankingSurfaceMode>("tier");
   const [activeView, setActiveView] = useState<WorkspaceView>("dashboard");
+  const [activeModal, setActiveModal] = useState<ActiveModal>(null);
+  const [categoryModal, setCategoryModal] = useState<CategoryModalState>(() =>
+    createEmptyCategoryModalState(),
+  );
+  const [workModal, setWorkModal] = useState<WorkModalState>(() =>
+    createEmptyWorkModalState(),
+  );
   const [newTierListName, setNewTierListName] = useState("五级分级");
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -171,6 +193,13 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   const categoryTree = useMemo(
     () => getCategoryTree(state.library),
     [state.library],
+  );
+  const rootCategories = useMemo(
+    () =>
+      state.library.categories.filter(
+        (category) => category.parentCategoryId === null,
+      ),
+    [state.library.categories],
   );
   const selectedCategory = state.selectedCategoryId
     ? state.library.categories.find(
@@ -313,18 +342,10 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
           rankingDimensionOptions,
         ) || null
       : null;
-  const rankingPreviewWorks = useMemo(
-    () =>
-      sortWorksForRanking(sharedCategoryWorks, {
-        mode: rankingPreviewMode,
-        dimensionId: selectedRankingPreviewDimensionId,
-      }),
-    [
-      rankingPreviewMode,
-      selectedRankingPreviewDimensionId,
-      sharedCategoryWorks,
-    ],
-  );
+  const rankingPreviewWorks = sortWorksForRanking(sharedCategoryWorks, {
+    mode: rankingPreviewMode,
+    dimensionId: selectedRankingPreviewDimensionId,
+  });
   const selectedWork = state.selectedWorkId
     ? state.library.works.find((work) => work.id === state.selectedWorkId)
     : null;
@@ -346,9 +367,12 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     repository,
     sharedCategoryWorks,
   );
-  const rootCategoryCount = state.library.categories.filter(
-    (category) => category.parentCategoryId === null,
-  ).length;
+  const selectedWorkCoverImageUrl = selectedWork
+    ? (coverImageUrls.get(selectedWork.id) ??
+      sharedCoverImageUrls.get(selectedWork.id) ??
+      null)
+    : null;
+  const rootCategoryCount = rootCategories.length;
   const childCategoryCount =
     state.library.categories.length - rootCategoryCount;
 
@@ -392,40 +416,65 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     }
   }
 
-  async function handleCreateCategory(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function openRootCategoryModal() {
+    setCategoryModal(createRootCategoryModalState());
+    setActiveModal("category");
+  }
 
-    if (newCategoryName.trim().length === 0) {
+  function openChildCategoryModal(parentCategoryId: string) {
+    setCategoryModal(createChildCategoryModalState(parentCategoryId));
+    setActiveModal("category");
+  }
+
+  function closeActiveModal() {
+    setActiveModal(null);
+  }
+
+  async function handleSaveCategoryModal(input: CategoryModalState) {
+    const name = input.name.trim();
+
+    if (name.length === 0) {
       setActionError("分类名称不能为空。");
       return;
     }
 
-    await runAction(async () => {
-      await controller.createCategory(newCategoryName, null);
-      setNewCategoryName("");
-    });
-  }
+    let templates: RatingDimensionTemplate[] = [];
 
-  async function handleCreateChildCategory(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+    if (input.mode === "root") {
+      const templateState = readTemplateDrafts(input.dimensionDrafts);
 
-    if (!selectedRootCategory) {
+      if (templateState.errorMessage) {
+        setActionError(templateState.errorMessage);
+        return;
+      }
+
+      templates = templateState.templates;
+    } else if (!input.parentCategoryId) {
       setActionError("先选择一个大分类。");
       return;
     }
 
-    if (newChildCategoryName.trim().length === 0) {
-      setActionError("子分类名称不能为空。");
-      return;
-    }
-
-    await runAction(async () => {
-      await controller.createCategory(
-        newChildCategoryName,
-        selectedRootCategory.id,
+    const categoryId = await runAction(async () => {
+      const createdCategoryId = await controller.createCategory(
+        name,
+        input.mode === "child" ? input.parentCategoryId : null,
       );
-      setNewChildCategoryName("");
+      controller.selectCategory(createdCategoryId);
+
+      if (input.mode === "root") {
+        await controller.updateSelectedCategoryRatingDimensions(templates);
+      }
+
+      return createdCategoryId;
     });
+
+    if (categoryId) {
+      setActiveModal(null);
+      setActiveView("dashboard");
+      setActionMessage(
+        input.mode === "root" ? "已创建大分类。" : "已创建子分类。",
+      );
+    }
   }
 
   async function handleRenameCategory(event: FormEvent<HTMLFormElement>) {
@@ -460,27 +509,111 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     await runAction(async () => controller.deleteSelectedCategory());
   }
 
-  async function handleCreateWork(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function openCreateWorkModal() {
+    const categoryId =
+      selectedCategory?.id ?? selectedRootCategory?.id ?? rootCategories[0]?.id;
+    setWorkModal(
+      createWorkModalState({
+        categoryId: categoryId ?? null,
+        library: state.library,
+      }),
+    );
+    setActiveModal("work");
+  }
 
-    if (newWorkTitle.trim().length === 0) {
+  function openEditWorkModal(work: Work) {
+    controller.selectWork(work.id);
+    setWorkModal(
+      createEditWorkModalState({
+        coverPreviewUrl:
+          coverImageUrls.get(work.id) ??
+          sharedCoverImageUrls.get(work.id) ??
+          null,
+        library: state.library,
+        work,
+      }),
+    );
+    setActiveModal("work");
+  }
+
+  function handleWorkModalCategoryChange(categoryId: string | null) {
+    setWorkModal((current) =>
+      syncWorkModalCategory(current, state.library, categoryId),
+    );
+  }
+
+  async function handleSaveWorkModal(input: WorkModalState) {
+    const title = input.title.trim();
+
+    if (title.length === 0) {
       setActionError("作品名称不能为空。");
       return;
     }
 
-    await runAction(async () => {
-      await controller.createWork(newWorkTitle);
-      setNewWorkTitle("");
+    if (!input.categoryId) {
+      setActionError("先选择一个分类。");
+      return;
+    }
+
+    const dimensionState = readDimensionDrafts(input.ratingDimensions);
+
+    if (dimensionState.errorMessage) {
+      setActionError(dimensionState.errorMessage);
+      return;
+    }
+
+    const workId = await runAction(async () => {
+      const saveInput = {
+        title,
+        tags: parseTagText(input.tagsText),
+        shortReview: input.shortReview,
+        longReview: input.longReview,
+        ratingDimensions: dimensionState.ratingDimensions,
+      };
+
+      if (input.mode === "edit") {
+        if (!input.workId) {
+          throw new Error("Work not selected.");
+        }
+
+        controller.selectWork(input.workId);
+        await controller.updateSelectedWork(saveInput);
+
+        if (input.coverFileName && input.coverBytes) {
+          await controller.storeSelectedWorkCover(
+            input.coverFileName,
+            input.coverBytes,
+          );
+        }
+
+        return input.workId;
+      }
+
+      controller.selectCategory(input.categoryId);
+      const createdWorkId = await controller.createWork(title);
+      await controller.updateSelectedWork(saveInput);
+
+      if (input.coverFileName && input.coverBytes) {
+        await controller.storeSelectedWorkCover(
+          input.coverFileName,
+          input.coverBytes,
+        );
+      }
+
+      return createdWorkId;
     });
+
+    if (workId) {
+      controller.selectWork(workId);
+      setActiveModal(null);
+      setActiveView("work");
+      setActionMessage(input.mode === "edit" ? "已保存作品。" : "已创建作品。");
+    }
   }
 
   function handleOpenWorkDetail(workId: string) {
     controller.selectWork(workId);
     setActiveView("work");
-  }
-
-  async function handleSaveWork(input: WorkSaveInput) {
-    await runAction(async () => controller.updateSelectedWork(input));
   }
 
   function toggleTagFilter(tag: string) {
@@ -508,12 +641,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
       await controller.deleteSelectedWork();
       setActiveView("dashboard");
     });
-  }
-
-  async function handleStoreWorkCover(fileName: string, bytes: Uint8Array) {
-    await runAction(async () =>
-      controller.storeSelectedWorkCover(fileName, bytes),
-    );
   }
 
   async function openExportDialog(
@@ -785,23 +912,40 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
 
       return (
         <div className="category-group" key={node.category.id}>
-          <button
+          <div
             className={
               selectedRoot || selectedChild
-                ? "category-root-button selected"
-                : "category-root-button"
+                ? "category-root-row selected"
+                : "category-root-row"
             }
-            type="button"
-            onClick={() => handleSelectCategory(node.category.id)}
           >
-            <div className="category-button-row">
-              <FolderOpen aria-hidden="true" size={16} />
-              <span>{node.category.name}</span>
-            </div>
-            <small>
-              {workCount} 作品{childCount > 0 ? ` · ${childCount} 子分类` : ""}
-            </small>
-          </button>
+            <button
+              className="category-root-button"
+              type="button"
+              onClick={() => handleSelectCategory(node.category.id)}
+            >
+              <div className="category-button-row">
+                <FolderOpen aria-hidden="true" size={16} />
+                <span>{node.category.name}</span>
+              </div>
+              <small>
+                {workCount} 作品
+                {childCount > 0 ? ` · ${childCount} 子分类` : ""}
+              </small>
+            </button>
+            <button
+              className="category-add-child-button"
+              type="button"
+              aria-label={`在 ${node.category.name} 下创建子分类`}
+              title="创建子分类"
+              onClick={(event) => {
+                event.stopPropagation();
+                openChildCategoryModal(node.category.id);
+              }}
+            >
+              <FolderPlus aria-hidden="true" size={15} />
+            </button>
+          </div>
           {node.children.length > 0 ? (
             <div className="category-child-list">
               {node.children.map((child) => {
@@ -809,24 +953,56 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   (work) => work.categoryId === child.category.id,
                 ).length;
                 const selected = state.selectedCategoryId === child.category.id;
+                const childWorks = state.library.works
+                  .filter((work) => work.categoryId === child.category.id)
+                  .sort((left, right) =>
+                    right.updatedAt.localeCompare(left.updatedAt),
+                  );
 
                 return (
-                  <button
-                    key={child.category.id}
-                    className={
-                      selected
-                        ? "category-child-button selected"
-                        : "category-child-button"
-                    }
-                    type="button"
-                    onClick={() => handleSelectCategory(child.category.id)}
-                  >
-                    <div className="category-button-row">
-                      <FolderPlus aria-hidden="true" size={15} />
-                      <span>{child.category.name}</span>
-                    </div>
-                    <small>{childWorkCount} 作品 · 共用上级设置</small>
-                  </button>
+                  <div className="category-child-group" key={child.category.id}>
+                    <button
+                      className={
+                        selected
+                          ? "category-child-button selected"
+                          : "category-child-button"
+                      }
+                      type="button"
+                      onClick={() => handleSelectCategory(child.category.id)}
+                    >
+                      <div className="category-button-row">
+                        <FolderPlus aria-hidden="true" size={15} />
+                        <span>{child.category.name}</span>
+                      </div>
+                      <small>{childWorkCount} 作品 · 共用上级设置</small>
+                    </button>
+                    {selected && childWorks.length > 0 ? (
+                      <div
+                        className="category-work-list"
+                        aria-label={`${child.category.name} 的作品`}
+                      >
+                        {childWorks.map((work) => (
+                          <button
+                            key={work.id}
+                            className={
+                              work.id === state.selectedWorkId
+                                ? "category-work-button selected"
+                                : "category-work-button"
+                            }
+                            type="button"
+                            onClick={() => handleOpenWorkDetail(work.id)}
+                          >
+                            <span>{work.title}</span>
+                            <small>
+                              {work.finalScore === null
+                                ? "未评分"
+                                : `${work.finalScore} 分`}
+                            </small>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>
@@ -906,58 +1082,29 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
           </button>
         </nav>
 
-        <form
-          className="create-form category-create-form"
-          onSubmit={handleCreateCategory}
-        >
-          <label htmlFor="new-category">新大分类</label>
-          <div className="inline-form-row">
-            <input
-              id="new-category"
-              value={newCategoryName}
-              onChange={(event) => setNewCategoryName(event.target.value)}
-              placeholder="动画 / 影视作品 / 音乐"
-            />
-            <button
-              className="icon-button primary"
-              type="submit"
-              aria-label="创建大分类"
-            >
-              <FolderPlus aria-hidden="true" size={18} />
-            </button>
-          </div>
-        </form>
-
-        <form
-          className="create-form category-create-form"
-          onSubmit={handleCreateChildCategory}
-        >
-          <label htmlFor="new-child-category">新子分类</label>
-          <div className="inline-form-row">
-            <input
-              id="new-child-category"
-              value={newChildCategoryName}
-              onChange={(event) => setNewChildCategoryName(event.target.value)}
-              placeholder={
-                selectedRootCategory ? "2026年1月新番" : "先选择一个大分类"
-              }
-              disabled={!selectedRootCategory}
-            />
-            <button
-              className="icon-button primary"
-              type="submit"
-              aria-label="创建子分类"
-              disabled={!selectedRootCategory}
-            >
-              <FolderPlus aria-hidden="true" size={18} />
-            </button>
-          </div>
-          {selectedRootCategory ? (
-            <p className="form-note">创建到「{selectedRootCategory.name}」。</p>
-          ) : null}
-        </form>
+        <div className="sidebar-actions">
+          <button
+            className="sidebar-primary-action"
+            type="button"
+            onClick={openCreateWorkModal}
+            disabled={rootCategories.length === 0}
+          >
+            <ListPlus aria-hidden="true" size={16} />
+            添加作品
+          </button>
+          <button
+            className="sidebar-secondary-action"
+            type="button"
+            aria-label="创建大分类"
+            onClick={openRootCategoryModal}
+          >
+            <FolderPlus aria-hidden="true" size={16} />
+            创建新大类
+          </button>
+        </div>
 
         <nav className="category-list" aria-label="分类列表">
+          <p className="sidebar-section-title">媒体库分类</p>
           {renderCategoryNodes(categoryTree)}
         </nav>
       </aside>
@@ -1156,31 +1303,22 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
               </section>
 
               <section className="panel">
-                <div className="panel-heading">
-                  <ListPlus aria-hidden="true" size={18} />
-                  <h3>作品</h3>
-                </div>
-
-                <form className="create-form" onSubmit={handleCreateWork}>
-                  <label htmlFor="new-work">新作品</label>
-                  <div className="inline-form-row">
-                    <input
-                      id="new-work"
-                      value={newWorkTitle}
-                      onChange={(event) => setNewWorkTitle(event.target.value)}
-                      placeholder="作品名"
-                      disabled={!selectedCategory}
-                    />
-                    <button
-                      className="icon-button primary"
-                      type="submit"
-                      aria-label="创建作品"
-                      disabled={!selectedCategory}
-                    >
-                      <ListPlus aria-hidden="true" size={18} />
-                    </button>
+                <div className="panel-heading panel-heading-split">
+                  <div>
+                    <ListPlus aria-hidden="true" size={18} />
+                    <h3>作品</h3>
                   </div>
-                </form>
+                  <button
+                    className="text-button"
+                    type="button"
+                    aria-label="添加当前分类作品"
+                    onClick={openCreateWorkModal}
+                    disabled={!selectedCategory}
+                  >
+                    <ListPlus aria-hidden="true" size={16} />
+                    添加作品
+                  </button>
+                </div>
 
                 <div className="tag-filter-bar" aria-label="标签筛选">
                   <div className="tag-filter-heading">
@@ -1240,7 +1378,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                             : "work-button"
                         }
                         type="button"
-                        onClick={() => controller.selectWork(work.id)}
+                        onClick={() => handleOpenWorkDetail(work.id)}
                       >
                         <span>{work.title}</span>
                         <small>
@@ -1315,35 +1453,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   </p>
                 )}
               </section>
-
-              <section className="panel">
-                <div className="panel-heading">
-                  <FileText aria-hidden="true" size={18} />
-                  <h3>当前作品</h3>
-                </div>
-
-                {selectedWork ? (
-                  <WorkEditor
-                    key={`${selectedWork.id}-${selectedWork.updatedAt}`}
-                    work={selectedWork}
-                    categoryName={
-                      selectedWorkCategoryPath ||
-                      selectedCategoryPath ||
-                      (selectedCategory?.name ?? "")
-                    }
-                    coverImageUrl={coverImageUrls.get(selectedWork.id) ?? null}
-                    onSave={handleSaveWork}
-                    onDelete={handleDeleteWork}
-                    onCoverUpload={handleStoreWorkCover}
-                    onExport={handleExportWorkShare}
-                  />
-                ) : (
-                  <p className="muted">
-                    <BookOpen aria-hidden="true" size={16} />
-                    选择或创建一个作品后，可以编辑封面、短评和长评。
-                  </p>
-                )}
-              </section>
             </div>
           </div>
         ) : workDetailView ? (
@@ -1352,8 +1461,8 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
               <>
                 <section className="panel work-detail-hero">
                   <div className="work-detail-cover">
-                    {coverImageUrls.get(selectedWork.id) ? (
-                      <img src={coverImageUrls.get(selectedWork.id)} alt="" />
+                    {selectedWorkCoverImageUrl ? (
+                      <img src={selectedWorkCoverImageUrl} alt="" />
                     ) : (
                       <span>{selectedWork.coverImagePath ?? "未设置封面"}</span>
                     )}
@@ -1372,7 +1481,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                     <h3>{selectedWork.title}</h3>
                     <p>
                       {selectedWork.shortReview ||
-                        "还没有短评，可以回到仪表盘补充。"}
+                        "还没有短评，可以打开编辑补充。"}
                     </p>
                     <div className="work-detail-score-row">
                       <div>
@@ -1392,10 +1501,18 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                       <button
                         className="text-button primary"
                         type="button"
-                        onClick={() => setActiveView("dashboard")}
+                        onClick={() => openEditWorkModal(selectedWork)}
                       >
                         <Pencil aria-hidden="true" size={16} />
                         编辑评测
+                      </button>
+                      <button
+                        className="text-button danger"
+                        type="button"
+                        onClick={() => void handleDeleteWork()}
+                      >
+                        <Trash2 aria-hidden="true" size={16} />
+                        删除作品
                       </button>
                       <button
                         className="text-button"
@@ -1480,45 +1597,116 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
             )}
           </div>
         ) : rankingsView ? (
-          <div className="content-grid rankings-grid">
-            <div className="stack">
-              <section className="panel">
-                <div className="panel-heading">
-                  <Trophy aria-hidden="true" size={18} />
-                  <h3>排名预览</h3>
-                </div>
+          <div className="ranking-hall">
+            <section className="ranking-hero-panel">
+              <div>
+                <p className="eyebrow">排行榜</p>
+                <h3>荣誉殿堂</h3>
+                <p>
+                  {selectedRootCategory
+                    ? `${selectedRootCategory.name} 下共有 ${sharedCategoryWorks.length} 个作品。`
+                    : "先创建一个大分类，再生成分值排名或五级分级。"}
+                </p>
+              </div>
+              <div className="segmented-control" aria-label="排行榜视图">
+                <button
+                  className={
+                    rankingSurfaceMode === "tier" ? "selected" : undefined
+                  }
+                  type="button"
+                  aria-pressed={rankingSurfaceMode === "tier"}
+                  onClick={() => setRankingSurfaceMode("tier")}
+                >
+                  Tier List
+                </button>
+                <button
+                  className={
+                    rankingSurfaceMode === "score" ? "selected" : undefined
+                  }
+                  type="button"
+                  aria-pressed={rankingSurfaceMode === "score"}
+                  onClick={() => setRankingSurfaceMode("score")}
+                >
+                  分值排名
+                </button>
+              </div>
+            </section>
 
-                <RankingPreviewPanel
-                  rootCategory={selectedRootCategory}
-                  mode={rankingPreviewMode}
-                  dimensionOptions={rankingDimensionOptions}
-                  selectedDimensionId={selectedRankingPreviewDimensionId}
-                  works={rankingPreviewWorks}
-                  onModeChange={(mode) => {
+            <section className="ranking-toolbar" aria-label="排行榜筛选">
+              <div className="toolbar-field">
+                <span>分类</span>
+                <select
+                  aria-label="排行榜分类"
+                  value={selectedRootCategory?.id ?? ""}
+                  onChange={(event) => handleSelectCategory(event.target.value)}
+                  disabled={rootCategories.length === 0}
+                >
+                  {rootCategories.length > 0 ? (
+                    rootCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">暂无分类</option>
+                  )}
+                </select>
+              </div>
+
+              <div className="toolbar-field">
+                <span>排序维度</span>
+                <select
+                  aria-label="排序维度类型"
+                  value={rankingPreviewMode}
+                  onChange={(event) => {
+                    const mode = event.currentTarget.value as ScoreRankingMode;
                     setRankingPreviewMode(mode);
                     if (mode !== "dimension") {
                       setRankingPreviewDimensionId("");
                     }
                   }}
-                  onDimensionChange={setRankingPreviewDimensionId}
-                  onExport={handleExportRankingPreview}
-                />
-              </section>
+                >
+                  <option value="finalScore">综合评分</option>
+                  <option value="dimension">单个评分维度</option>
+                </select>
+              </div>
 
-              <section className="panel">
-                <div className="panel-heading">
-                  <Layers aria-hidden="true" size={18} />
-                  <h3>五级分级</h3>
-                </div>
+              <div className="toolbar-field">
+                <span>评分维度</span>
+                <select
+                  aria-label="评分维度"
+                  value={selectedRankingPreviewDimensionId ?? ""}
+                  onChange={(event) =>
+                    setRankingPreviewDimensionId(event.currentTarget.value)
+                  }
+                  disabled={
+                    rankingPreviewMode !== "dimension" ||
+                    rankingDimensionOptions.length === 0
+                  }
+                >
+                  {rankingDimensionOptions.length > 0 ? (
+                    rankingDimensionOptions.map((dimension) => (
+                      <option key={dimension.id} value={dimension.id}>
+                        {dimension.name}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">暂无可用评分维度</option>
+                  )}
+                </select>
+              </div>
+            </section>
 
-                {selectedCategory ? (
-                  <>
-                    <form
-                      className="create-form tier-create-form"
-                      onSubmit={handleCreateTierList}
-                    >
-                      <label htmlFor="new-tier-list">新分级</label>
-                      <div className="inline-form-row">
+            {rankingSurfaceMode === "tier" ? (
+              <>
+                <section className="tier-control-panel">
+                  {selectedCategory ? (
+                    <>
+                      <form
+                        className="tier-create-toolbar"
+                        onSubmit={handleCreateTierList}
+                      >
+                        <label htmlFor="new-tier-list">新分级</label>
                         <input
                           id="new-tier-list"
                           value={newTierListName}
@@ -1527,78 +1715,83 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                           }
                           placeholder="五级分级"
                         />
-                        <button
-                          className="icon-button primary"
-                          type="submit"
-                          aria-label="创建分级"
-                        >
-                          <ListPlus aria-hidden="true" size={18} />
+                        <button className="text-button primary" type="submit">
+                          <ListPlus aria-hidden="true" size={16} />
+                          创建分级
                         </button>
+                      </form>
+
+                      <div className="tier-list" aria-label="分级列表">
+                        {categoryTierLists.length > 0 ? (
+                          categoryTierLists.map((tierList) => {
+                            const selected =
+                              tierList.id === state.selectedTierListId;
+                            const assignedCount = countTierListWorks(tierList);
+
+                            return (
+                              <button
+                                key={tierList.id}
+                                className={
+                                  selected
+                                    ? "tier-list-button selected"
+                                    : "tier-list-button"
+                                }
+                                type="button"
+                                onClick={() =>
+                                  controller.selectTierList(tierList.id)
+                                }
+                              >
+                                <span>{tierList.name}</span>
+                                <small>{assignedCount} 作品</small>
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <p className="muted">这个分类还没有五级分级。</p>
+                        )}
                       </div>
-                    </form>
+                    </>
+                  ) : (
+                    <p className="muted">先创建一个分类，再创建分级。</p>
+                  )}
+                </section>
 
-                    <div className="tier-list" aria-label="分级列表">
-                      {categoryTierLists.length > 0 ? (
-                        categoryTierLists.map((tierList) => {
-                          const selected =
-                            tierList.id === state.selectedTierListId;
-                          const assignedCount = countTierListWorks(tierList);
-
-                          return (
-                            <button
-                              key={tierList.id}
-                              className={
-                                selected
-                                  ? "tier-list-button selected"
-                                  : "tier-list-button"
-                              }
-                              type="button"
-                              onClick={() =>
-                                controller.selectTierList(tierList.id)
-                              }
-                            >
-                              <span>{tierList.name}</span>
-                              <small>{assignedCount} 作品</small>
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <p className="muted">这个分类还没有五级分级。</p>
-                      )}
+                <section className="panel tier-board-panel">
+                  {selectedTierList ? (
+                    <TierListEditor
+                      key={`${selectedTierList.id}-${selectedTierList.updatedAt}`}
+                      tierList={selectedTierList}
+                      works={sharedCategoryWorks}
+                      coverImageUrls={sharedCoverImageUrls}
+                      onSave={handleSaveTierList}
+                      onDelete={handleDeleteTierList}
+                      onMoveWork={handleMoveTierListWork}
+                      onRemoveWork={handleRemoveTierListWork}
+                      onExport={handleExportTierListShare}
+                    />
+                  ) : (
+                    <div className="center-state">
+                      <Layers aria-hidden="true" size={28} />
+                      <p>创建一个五级分级后，可以把作品放进 S 到 D。</p>
                     </div>
-                  </>
-                ) : (
-                  <p className="muted">先创建一个分类，再创建分级。</p>
-                )}
+                  )}
+                </section>
+              </>
+            ) : (
+              <section className="panel score-ranking-panel">
+                <RankingPreviewPanel
+                  rootCategory={selectedRootCategory}
+                  library={state.library}
+                  mode={rankingPreviewMode}
+                  dimensionOptions={rankingDimensionOptions}
+                  selectedDimensionId={selectedRankingPreviewDimensionId}
+                  works={rankingPreviewWorks}
+                  coverImageUrls={sharedCoverImageUrls}
+                  onOpenWork={handleOpenWorkDetail}
+                  onExport={handleExportRankingPreview}
+                />
               </section>
-            </div>
-
-            <div className="stack">
-              <section className="panel">
-                <div className="panel-heading">
-                  <Layers aria-hidden="true" size={18} />
-                  <h3>分级详情</h3>
-                </div>
-
-                {selectedTierList ? (
-                  <TierListEditor
-                    key={`${selectedTierList.id}-${selectedTierList.updatedAt}`}
-                    tierList={selectedTierList}
-                    works={sharedCategoryWorks}
-                    coverImageUrls={sharedCoverImageUrls}
-                    onSave={handleSaveTierList}
-                    onDelete={handleDeleteTierList}
-                    onMoveWork={handleMoveTierListWork}
-                    onRemoveWork={handleRemoveTierListWork}
-                    onExport={handleExportTierListShare}
-                  />
-                ) : (
-                  <p className="muted">
-                    创建一个五级分级后，可以把作品放进 S 到 D。
-                  </p>
-                )}
-              </section>
-            </div>
+            )}
           </div>
         ) : sharingView ? (
           <div className="sharing-grid">
@@ -1611,8 +1804,8 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                 <>
                   <div className="work-share-preview">
                     <div className="work-share-preview-cover">
-                      {coverImageUrls.get(selectedWork.id) ? (
-                        <img src={coverImageUrls.get(selectedWork.id)} alt="" />
+                      {selectedWorkCoverImageUrl ? (
+                        <img src={selectedWorkCoverImageUrl} alt="" />
                       ) : (
                         <span>
                           {selectedWork.coverImagePath ?? "未设置封面"}
@@ -1716,6 +1909,28 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
           </p>
         ) : null}
 
+        {activeModal === "category" ? (
+          <CategoryModal
+            state={categoryModal}
+            library={state.library}
+            onChange={setCategoryModal}
+            onClose={closeActiveModal}
+            onSave={(input) => void handleSaveCategoryModal(input)}
+          />
+        ) : null}
+
+        {activeModal === "work" ? (
+          <WorkModal
+            state={workModal}
+            library={state.library}
+            rootCategories={rootCategories}
+            onChange={setWorkModal}
+            onCategoryChange={handleWorkModalCategoryChange}
+            onClose={closeActiveModal}
+            onSave={(input) => void handleSaveWorkModal(input)}
+          />
+        ) : null}
+
         {exportDialog ? (
           <div
             className="export-overlay"
@@ -1812,16 +2027,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
       </section>
     </main>
   );
-}
-
-interface WorkEditorProps {
-  work: Work;
-  categoryName: string;
-  coverImageUrl: string | null;
-  onSave(input: WorkSaveInput): Promise<void>;
-  onDelete(): Promise<void>;
-  onCoverUpload(fileName: string, bytes: Uint8Array): Promise<void>;
-  onExport(variant: WorkShareVariant): Promise<void>;
 }
 
 interface CategoryDimensionEditorProps {
@@ -1994,317 +2199,545 @@ interface RatingDimensionDraftState {
   ratingDimensions: RatingDimensionScore[];
 }
 
-interface WorkDraft {
-  title: string;
-  tagsText: string;
-  shortReview: string;
-  longReview: string;
+interface CategoryModalProps {
+  state: CategoryModalState;
+  library: TasteLibrary;
+  onChange(state: CategoryModalState): void;
+  onClose(): void;
+  onSave(state: CategoryModalState): Promise<void> | void;
 }
 
-function WorkEditor({
-  work,
-  categoryName,
-  coverImageUrl,
+function CategoryModal({
+  state,
+  library,
+  onChange,
+  onClose,
   onSave,
-  onDelete,
-  onCoverUpload,
-  onExport,
-}: WorkEditorProps) {
-  const [workDraft, setWorkDraft] = useState<WorkDraft>(() => ({
-    title: work.title,
-    tagsText: work.tags.join(", "),
-    shortReview: work.shortReview,
-    longReview: work.longReview,
-  }));
-  const [dimensionDrafts, setDimensionDrafts] = useState<
-    RatingDimensionDraft[]
-  >(() => createDimensionDrafts(work.ratingDimensions));
-  const [draftError, setDraftError] = useState<string | null>(null);
-  const [exportingVariant, setExportingVariant] =
-    useState<WorkShareVariant | null>(null);
+}: CategoryModalProps) {
+  const parentCategory = state.parentCategoryId
+    ? (library.categories.find(
+        (category) => category.id === state.parentCategoryId,
+      ) ?? null)
+    : null;
+  const isRootMode = state.mode === "root";
+  const title = isRootMode ? "创建新大类" : "创建新小类";
+  const description = isRootMode
+    ? "定义分类和默认评分维度"
+    : "在大类下细分作品";
 
-  const dimensionState = useMemo(
-    () => readDimensionDrafts(dimensionDrafts),
-    [dimensionDrafts],
-  );
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (dimensionState.errorMessage) {
-      setDraftError(dimensionState.errorMessage);
-      return;
-    }
-
-    setDraftError(null);
-
-    await onSave({
-      title: workDraft.title,
-      tags: parseTagText(workDraft.tagsText),
-      shortReview: workDraft.shortReview,
-      longReview: workDraft.longReview,
-      ratingDimensions: dimensionState.ratingDimensions,
+  function updateName(name: string) {
+    onChange({
+      ...state,
+      name,
     });
   }
 
-  async function handleCoverUpload(event: ChangeEvent<HTMLInputElement>) {
+  function updateDimensionDraft(
+    id: string,
+    field: keyof Omit<RatingTemplateDraft, "id">,
+    value: string,
+  ) {
+    onChange({
+      ...state,
+      dimensionDrafts: state.dimensionDrafts.map((draft) =>
+        draft.id === id ? { ...draft, [field]: value } : draft,
+      ),
+    });
+  }
+
+  function addDimensionDraft() {
+    onChange({
+      ...state,
+      dimensionDrafts: [
+        ...state.dimensionDrafts,
+        createNewTemplateDraft(state.dimensionDrafts.length),
+      ],
+    });
+  }
+
+  function removeDimensionDraft(id: string) {
+    onChange({
+      ...state,
+      dimensionDrafts: state.dimensionDrafts.filter((draft) => draft.id !== id),
+    });
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void onSave(state);
+  }
+
+  return (
+    <div className="modal-overlay" role="presentation" onClick={onClose}>
+      <div
+        className="modal-shell category-modal-shell"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="category-modal-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">分类</p>
+            <h3 id="category-modal-title">{title}</h3>
+            <p>{description}</p>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="关闭分类弹窗"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" size={16} />
+          </button>
+        </div>
+
+        <form className="modal-form" noValidate onSubmit={handleSubmit}>
+          {!isRootMode ? (
+            <div className="modal-field">
+              <label htmlFor="category-parent-name">所属大类</label>
+              <input
+                id="category-parent-name"
+                value={parentCategory?.name ?? ""}
+                readOnly
+              />
+            </div>
+          ) : null}
+
+          <div className="modal-field">
+            <label htmlFor="category-modal-name">
+              {isRootMode ? "大类名称" : "小类名称"}
+            </label>
+            <input
+              id="category-modal-name"
+              value={state.name}
+              onChange={(event) => updateName(event.currentTarget.value)}
+              placeholder={
+                isRootMode ? "如：动画、图书、游戏" : "如：2026年1月新番"
+              }
+              autoFocus
+            />
+          </div>
+
+          {isRootMode ? (
+            <div className="modal-section">
+              <div className="modal-section-heading">
+                <div>
+                  <h4>默认评分维度</h4>
+                  <p>同一个大类及其小类会共用这些维度。</p>
+                </div>
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={addDimensionDraft}
+                >
+                  <ListPlus aria-hidden="true" size={16} />
+                  添加维度
+                </button>
+              </div>
+
+              <div className="modal-dimension-list">
+                {state.dimensionDrafts.map((draft, index) => {
+                  const number = index + 1;
+                  const nameId = `category-modal-dimension-${draft.id}`;
+                  const weightId = `category-modal-weight-${draft.id}`;
+
+                  return (
+                    <div className="modal-dimension-row" key={draft.id}>
+                      <div className="dimension-field">
+                        <label htmlFor={nameId}>默认维度名称 {number}</label>
+                        <input
+                          id={nameId}
+                          value={draft.name}
+                          onChange={(event) =>
+                            updateDimensionDraft(
+                              draft.id,
+                              "name",
+                              event.currentTarget.value,
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="dimension-field">
+                        <label htmlFor={weightId}>默认权重 {number}</label>
+                        <input
+                          id={weightId}
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={draft.weight}
+                          onChange={(event) =>
+                            updateDimensionDraft(
+                              draft.id,
+                              "weight",
+                              event.currentTarget.value,
+                            )
+                          }
+                        />
+                      </div>
+                      <button
+                        className="icon-button danger"
+                        type="button"
+                        aria-label={`删除默认评分维度 ${number}`}
+                        onClick={() => removeDimensionDraft(draft.id)}
+                      >
+                        <Trash2 aria-hidden="true" size={16} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <p className="inline-hint">
+              小类不单独设置评分维度，会共用所属大类的维度和排行。
+            </p>
+          )}
+
+          <div className="modal-actions">
+            <button className="text-button" type="button" onClick={onClose}>
+              取消
+            </button>
+            <button className="text-button primary" type="submit">
+              <Save aria-hidden="true" size={16} />
+              {isRootMode ? "确认创建" : "完成创建"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+interface WorkModalProps {
+  state: WorkModalState;
+  library: TasteLibrary;
+  rootCategories: Category[];
+  onChange(state: WorkModalState): void;
+  onCategoryChange(categoryId: string | null): void;
+  onClose(): void;
+  onSave(state: WorkModalState): Promise<void> | void;
+}
+
+function WorkModal({
+  state,
+  library,
+  rootCategories,
+  onChange,
+  onCategoryChange,
+  onClose,
+  onSave,
+}: WorkModalProps) {
+  const selectedRootId =
+    resolveWorkModalRootId(library, state.categoryId) ??
+    rootCategories[0]?.id ??
+    "";
+  const selectedRootCategory =
+    rootCategories.find((category) => category.id === selectedRootId) ?? null;
+  const childCategories = selectedRootCategory
+    ? library.categories.filter(
+        (category) => category.parentCategoryId === selectedRootCategory.id,
+      )
+    : [];
+  const subcategoryValue =
+    state.categoryId && state.categoryId !== selectedRootId
+      ? state.categoryId
+      : "";
+  const dimensionState = readDimensionDrafts(state.ratingDimensions);
+  const scoreLabel = dimensionState.errorMessage
+    ? "评分维度需要修正后才能保存"
+    : dimensionState.finalScore === null
+      ? "当前大类还没有评分维度"
+      : `当前评分 ${dimensionState.finalScore}`;
+  const categoryControlsDisabled = state.mode === "edit";
+
+  function updateField(
+    field: keyof Pick<
+      WorkModalState,
+      "title" | "tagsText" | "shortReview" | "longReview"
+    >,
+    value: string,
+  ) {
+    onChange({
+      ...state,
+      [field]: value,
+    });
+  }
+
+  function updateDimensionScore(id: string, score: string) {
+    onChange({
+      ...state,
+      ratingDimensions: state.ratingDimensions.map((dimension) =>
+        dimension.id === id ? { ...dimension, score } : dimension,
+      ),
+    });
+  }
+
+  async function handleCoverChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
 
     if (!file) {
       return;
     }
 
-    await onCoverUpload(file.name, new Uint8Array(await file.arrayBuffer()));
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const coverPreviewUrl = await createDisplayImageDataUrl(file.name, bytes);
+    onChange({
+      ...state,
+      coverFileName: file.name,
+      coverBytes: bytes,
+      coverPreviewUrl,
+    });
     event.currentTarget.value = "";
   }
 
-  async function handleExport(variant: WorkShareVariant) {
-    setExportingVariant(variant);
-    try {
-      await onExport(variant);
-    } finally {
-      setExportingVariant(null);
-    }
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void onSave(state);
   }
-
-  function updateDimensionDraft(id: string, value: string) {
-    setDraftError(null);
-    setDimensionDrafts((current) =>
-      current.map((draft) =>
-        draft.id === id
-          ? {
-              ...draft,
-              score: value,
-            }
-          : draft,
-      ),
-    );
-  }
-
-  function updateWorkDraft(field: keyof WorkDraft, value: string) {
-    setWorkDraft((current) => ({
-      ...current,
-      [field]: value,
-    }));
-  }
-
-  const scoreLabel = dimensionState.errorMessage
-    ? "评分维度需要修正后才能保存。"
-    : dimensionState.finalScore === null
-      ? "当前分类还没有评分维度。"
-      : `当前评分 ${dimensionState.finalScore}`;
 
   return (
-    <form
-      className="detail-form"
-      noValidate
-      onSubmit={(event) => void handleSubmit(event)}
-    >
-      <label htmlFor="work-title">作品名</label>
-      <input
-        id="work-title"
-        name="workTitle"
-        value={workDraft.title}
-        onChange={(event) =>
-          updateWorkDraft("title", event.currentTarget.value)
-        }
-      />
-
-      <label htmlFor="work-tags">标签</label>
-      <input
-        id="work-tags"
-        name="workTags"
-        value={workDraft.tagsText}
-        onChange={(event) =>
-          updateWorkDraft("tagsText", event.currentTarget.value)
-        }
-        placeholder="新番, 2026年1月, 原创"
-      />
-
-      <div className="cover-row">
-        <div className="cover-preview">
-          {coverImageUrl ? (
-            <img src={coverImageUrl} alt="" />
-          ) : (
-            <ImagePlus aria-hidden="true" size={22} />
-          )}
-          <span>{work.coverImagePath ?? "未设置封面"}</span>
-        </div>
-        <label className="file-picker">
-          <ImagePlus aria-hidden="true" size={16} />
-          导入封面
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(event) => void handleCoverUpload(event)}
-          />
-        </label>
-      </div>
-
-      <div className="work-share-preview" aria-label="作品分享预览">
-        <div className="work-share-preview-cover">
-          {coverImageUrl ? (
-            <img src={coverImageUrl} alt="" />
-          ) : (
-            (work.coverImagePath ?? "未设置封面")
-          )}
-        </div>
-        <div className="work-share-preview-copy">
-          <p className="eyebrow">{categoryName || "未分类"}</p>
-          <strong>{work.title}</strong>
-          <small>
-            {work.finalScore === null ? "未评分" : `${work.finalScore} 分`}
-          </small>
-          {work.tags.length > 0 ? (
-            <div className="tag-chip-row compact">
-              {work.tags.map((tag) => (
-                <span className="tag-pill" key={tag}>
-                  {tag}
-                </span>
-              ))}
-            </div>
-          ) : null}
-          {work.shortReview ? <p>{work.shortReview}</p> : null}
-        </div>
-      </div>
-
-      <div className="dimension-editor">
-        <div className="dimension-header">
+    <div className="modal-overlay" role="presentation" onClick={onClose}>
+      <div
+        className="modal-shell work-modal-shell"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="work-modal-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-header">
           <div>
-            <h4>评分维度</h4>
-            <p className="score-note" aria-live="polite">
-              <Star aria-hidden="true" size={16} />
-              {scoreLabel}
+            <p className="eyebrow">作品</p>
+            <h3 id="work-modal-title">
+              {state.mode === "edit" ? "编辑评测" : "添加新作品"}
+            </h3>
+            <p>
+              {state.mode === "edit"
+                ? "修改作品信息与评分详情"
+                : "记录并评价你最近欣赏的媒体作品"}
             </p>
           </div>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="关闭作品弹窗"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" size={16} />
+          </button>
         </div>
 
-        {dimensionDrafts.length > 0 ? (
-          <div className="dimension-list">
-            {dimensionDrafts.map((dimension, index) => {
-              const number = index + 1;
-              const scoreId = `${work.id}-${dimension.id}-score`;
+        <form className="modal-form" noValidate onSubmit={handleSubmit}>
+          <div className="work-modal-grid">
+            <div className="modal-column">
+              <div className="modal-field">
+                <label htmlFor="work-modal-title-input">作品名称</label>
+                <input
+                  id="work-modal-title-input"
+                  value={state.title}
+                  onChange={(event) =>
+                    updateField("title", event.currentTarget.value)
+                  }
+                  placeholder="输入作品全称"
+                  autoFocus
+                />
+              </div>
 
-              return (
-                <div
-                  className="dimension-row work-dimension-row"
-                  key={dimension.id}
-                >
-                  <div className="dimension-summary">
-                    <strong>{dimension.name}</strong>
-                    <small>权重 {dimension.weight}</small>
-                  </div>
-                  <div className="dimension-field">
-                    <label htmlFor={scoreId}>评分 {number}</label>
-                    <input
-                      id={scoreId}
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={dimension.score}
-                      onChange={(event) =>
-                        updateDimensionDraft(
-                          dimension.id,
-                          event.currentTarget.value,
-                        )
-                      }
-                    />
+              <div className="modal-grid-two">
+                <div className="modal-field">
+                  <label htmlFor="work-modal-root-category">所属大类</label>
+                  <select
+                    id="work-modal-root-category"
+                    value={selectedRootId}
+                    onChange={(event) =>
+                      onCategoryChange(event.currentTarget.value || null)
+                    }
+                    disabled={categoryControlsDisabled}
+                  >
+                    {rootCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="modal-field">
+                  <label htmlFor="work-modal-child-category">所属小类</label>
+                  <select
+                    id="work-modal-child-category"
+                    value={subcategoryValue}
+                    onChange={(event) =>
+                      onCategoryChange(
+                        event.currentTarget.value || selectedRootId || null,
+                      )
+                    }
+                    disabled={
+                      categoryControlsDisabled || selectedRootCategory === null
+                    }
+                  >
+                    <option value="">不使用小类</option>
+                    {childCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {categoryControlsDisabled ? (
+                <p className="form-note">编辑已有作品时暂不移动分类。</p>
+              ) : null}
+
+              <div className="modal-field">
+                <label htmlFor="work-modal-tags">标签</label>
+                <input
+                  id="work-modal-tags"
+                  value={state.tagsText}
+                  onChange={(event) =>
+                    updateField("tagsText", event.currentTarget.value)
+                  }
+                  placeholder="新番, 2026年1月, 原创"
+                />
+              </div>
+
+              <div className="cover-row">
+                <div className="cover-preview">
+                  {state.coverPreviewUrl ? (
+                    <img src={state.coverPreviewUrl} alt="" />
+                  ) : (
+                    <ImagePlus aria-hidden="true" size={22} />
+                  )}
+                  <span>{state.coverFileName ?? "未设置封面"}</span>
+                </div>
+                <label className="file-picker">
+                  <ImagePlus aria-hidden="true" size={16} />
+                  导入封面
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => void handleCoverChange(event)}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="modal-column">
+              <div className="modal-section compact">
+                <div className="modal-section-heading">
+                  <div>
+                    <h4>维度评分</h4>
+                    <p className="score-note" aria-live="polite">
+                      <Star aria-hidden="true" size={16} />
+                      {scoreLabel}
+                    </p>
                   </div>
                 </div>
-              );
-            })}
+
+                {state.ratingDimensions.length > 0 ? (
+                  <div className="dimension-list">
+                    {state.ratingDimensions.map((dimension, index) => {
+                      const number = index + 1;
+                      const scoreId = `work-modal-score-${dimension.id}`;
+
+                      return (
+                        <div
+                          className="dimension-row work-dimension-row modal-work-score-row"
+                          key={dimension.id}
+                        >
+                          <div className="dimension-summary">
+                            <strong>{dimension.name}</strong>
+                            <small>权重 {dimension.weight}</small>
+                          </div>
+                          <div className="dimension-field">
+                            <label htmlFor={scoreId}>评分 {number}</label>
+                            <input
+                              id={scoreId}
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={dimension.score}
+                              onChange={(event) =>
+                                updateDimensionScore(
+                                  dimension.id,
+                                  event.currentTarget.value,
+                                )
+                              }
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="muted">先在大类里设置评分维度。</p>
+                )}
+              </div>
+
+              <div className="modal-field">
+                <label htmlFor="work-modal-short-review">短评</label>
+                <input
+                  id="work-modal-short-review"
+                  value={state.shortReview}
+                  onChange={(event) =>
+                    updateField("shortReview", event.currentTarget.value)
+                  }
+                  placeholder="一句话总结核心感受"
+                />
+              </div>
+
+              <div className="modal-field">
+                <label htmlFor="work-modal-long-review">长评</label>
+                <textarea
+                  id="work-modal-long-review"
+                  value={state.longReview}
+                  onChange={(event) =>
+                    updateField("longReview", event.currentTarget.value)
+                  }
+                  placeholder="写下完整评测"
+                  rows={6}
+                />
+              </div>
+            </div>
           </div>
-        ) : (
-          <p className="muted">添加一个评分维度后可以计算最终评分。</p>
-        )}
 
-        {draftError ? (
-          <p className="inline-error" role="alert">
-            {draftError}
-          </p>
-        ) : null}
+          <div className="modal-actions">
+            <button className="text-button" type="button" onClick={onClose}>
+              取消
+            </button>
+            <button className="text-button primary" type="submit">
+              <Save aria-hidden="true" size={16} />
+              保存作品
+            </button>
+          </div>
+        </form>
       </div>
-
-      <label htmlFor="short-review">短评</label>
-      <textarea
-        id="short-review"
-        name="shortReview"
-        value={workDraft.shortReview}
-        onChange={(event) =>
-          updateWorkDraft("shortReview", event.currentTarget.value)
-        }
-        rows={3}
-      />
-
-      <label htmlFor="long-review">长评</label>
-      <textarea
-        id="long-review"
-        name="longReview"
-        value={workDraft.longReview}
-        onChange={(event) =>
-          updateWorkDraft("longReview", event.currentTarget.value)
-        }
-        rows={8}
-      />
-
-      <div className="button-row">
-        <button className="text-button primary" type="submit">
-          <Save aria-hidden="true" size={16} />
-          保存作品
-        </button>
-        <button
-          className="text-button danger"
-          type="button"
-          onClick={() => void onDelete()}
-        >
-          <Trash2 aria-hidden="true" size={16} />
-          删除作品
-        </button>
-      </div>
-
-      <div className="button-row">
-        <button
-          className="text-button"
-          type="button"
-          onClick={() => void handleExport("cover")}
-          disabled={exportingVariant !== null}
-        >
-          <ImagePlus aria-hidden="true" size={16} />
-          {exportingVariant === "cover" ? "导出中" : "导出封面图"}
-        </button>
-        <button
-          className="text-button"
-          type="button"
-          onClick={() => void handleExport("long")}
-          disabled={exportingVariant !== null}
-        >
-          <FileText aria-hidden="true" size={16} />
-          {exportingVariant === "long" ? "导出中" : "导出长图"}
-        </button>
-      </div>
-    </form>
+    </div>
   );
 }
 
 interface RankingPreviewPanelProps {
   rootCategory: Category | null;
+  library: TasteLibrary;
   mode: ScoreRankingMode;
   dimensionOptions: RankingDimensionOption[];
   selectedDimensionId: string | null;
   works: Work[];
-  onModeChange(mode: ScoreRankingMode): void;
-  onDimensionChange(dimensionId: string): void;
+  coverImageUrls: Map<string, string>;
+  onOpenWork(workId: string): void;
   onExport(): Promise<void> | void;
 }
 
 function RankingPreviewPanel({
   rootCategory,
+  library,
   mode,
   dimensionOptions,
   selectedDimensionId,
   works,
-  onModeChange,
-  onDimensionChange,
+  coverImageUrls,
+  onOpenWork,
   onExport,
 }: RankingPreviewPanelProps) {
   const [isExporting, setIsExporting] = useState(false);
@@ -2332,43 +2765,15 @@ function RankingPreviewPanel({
 
   return (
     <div className="ranking-preview">
-      <div className="ranking-preview-controls">
+      <div className="score-ranking-header">
         <div>
-          <label htmlFor="ranking-preview-mode">排名方式</label>
-          <select
-            id="ranking-preview-mode"
-            value={mode}
-            onChange={(event) =>
-              onModeChange(event.currentTarget.value as ScoreRankingMode)
-            }
-          >
-            <option value="finalScore">最终评分</option>
-            <option value="dimension">单个评分维度</option>
-          </select>
+          <h3>数值排行榜</h3>
+          <p>
+            {mode === "dimension" && selectedDimensionId
+              ? getRankingDimensionName(selectedDimensionId, dimensionOptions)
+              : "综合评分"}
+          </p>
         </div>
-
-        <div>
-          <label htmlFor="ranking-preview-dimension">评分维度</label>
-          <select
-            id="ranking-preview-dimension"
-            value={selectedDimensionId ?? ""}
-            onChange={(event) => onDimensionChange(event.currentTarget.value)}
-            disabled={mode !== "dimension" || dimensionOptions.length === 0}
-          >
-            {dimensionOptions.length > 0 ? (
-              dimensionOptions.map((dimension) => (
-                <option key={dimension.id} value={dimension.id}>
-                  {dimension.name}
-                </option>
-              ))
-            ) : (
-              <option value="">暂无可用评分维度</option>
-            )}
-          </select>
-        </div>
-      </div>
-
-      <div className="button-row">
         <button
           className="text-button"
           type="button"
@@ -2386,17 +2791,42 @@ function RankingPreviewPanel({
 
       {works.length > 0 ? (
         <ol className="ranking-work-list" aria-label="排名作品">
-          {works.map((work, index) => (
-            <li className="ranking-work-row" key={work.id}>
-              <span className="rank-number">{index + 1}</span>
-              <div className="ranking-work-copy">
-                <strong>{work.title}</strong>
-                <small>
+          {works.map((work, index) => {
+            const coverImageUrl = coverImageUrls.get(work.id) ?? null;
+            const categoryPath = getCategoryLineage(library, work.categoryId)
+              .map((category) => category.name)
+              .join(" / ");
+
+            return (
+              <li className="ranking-work-row" key={work.id}>
+                <span className="rank-number">
+                  #{String(index + 1).padStart(2, "0")}
+                </span>
+                <span className="ranking-work-cover">
+                  {coverImageUrl ? (
+                    <img src={coverImageUrl} alt="" />
+                  ) : (
+                    <ImagePlus aria-hidden="true" size={18} />
+                  )}
+                </span>
+                <div className="ranking-work-copy">
+                  <strong>{work.title}</strong>
+                  <small>{categoryPath || rootCategory.name}</small>
+                </div>
+                <strong className="ranking-work-score">
                   {formatRankingPreviewScore(work, mode, selectedDimensionId)}
-                </small>
-              </div>
-            </li>
-          ))}
+                </strong>
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label={`打开 ${work.title}`}
+                  onClick={() => onOpenWork(work.id)}
+                >
+                  <ChevronRight aria-hidden="true" size={16} />
+                </button>
+              </li>
+            );
+          })}
         </ol>
       ) : (
         <p className="muted">这个大分类还没有作品。</p>
@@ -2676,6 +3106,168 @@ function TierWorkCard({
       </div>
     </article>
   );
+}
+
+function createEmptyCategoryModalState(): CategoryModalState {
+  return createRootCategoryModalState();
+}
+
+function createRootCategoryModalState(): CategoryModalState {
+  return {
+    mode: "root",
+    parentCategoryId: null,
+    name: "",
+    dimensionDrafts: [
+      {
+        id: `template-${crypto.randomUUID()}`,
+        name: "剧情",
+        weight: "1",
+      },
+      {
+        id: `template-${crypto.randomUUID()}`,
+        name: "画面",
+        weight: "1",
+      },
+    ],
+  };
+}
+
+function createChildCategoryModalState(
+  parentCategoryId: string,
+): CategoryModalState {
+  return {
+    mode: "child",
+    parentCategoryId,
+    name: "",
+    dimensionDrafts: [],
+  };
+}
+
+function createEmptyWorkModalState(): WorkModalState {
+  return {
+    mode: "create",
+    workId: null,
+    categoryId: null,
+    title: "",
+    tagsText: "",
+    shortReview: "",
+    longReview: "",
+    ratingDimensions: [],
+    coverFileName: null,
+    coverBytes: null,
+    coverPreviewUrl: null,
+  };
+}
+
+function createWorkModalState({
+  categoryId,
+  library,
+}: {
+  categoryId: string | null;
+  library: TasteLibrary;
+}): WorkModalState {
+  return {
+    ...createEmptyWorkModalState(),
+    categoryId,
+    ratingDimensions: createDimensionDraftsFromTemplates(
+      getWorkModalTemplates(library, categoryId),
+    ),
+  };
+}
+
+function createEditWorkModalState({
+  coverPreviewUrl,
+  library,
+  work,
+}: {
+  coverPreviewUrl: string | null;
+  library: TasteLibrary;
+  work: Work;
+}): WorkModalState {
+  const ratingDimensions =
+    work.ratingDimensions.length > 0
+      ? createDimensionDrafts(work.ratingDimensions)
+      : createDimensionDraftsFromTemplates(
+          getWorkModalTemplates(library, work.categoryId),
+        );
+
+  return {
+    mode: "edit",
+    workId: work.id,
+    categoryId: work.categoryId,
+    title: work.title,
+    tagsText: work.tags.join(", "),
+    shortReview: work.shortReview,
+    longReview: work.longReview,
+    ratingDimensions,
+    coverFileName: work.coverImagePath,
+    coverBytes: null,
+    coverPreviewUrl,
+  };
+}
+
+function syncWorkModalCategory(
+  current: WorkModalState,
+  library: TasteLibrary,
+  categoryId: string | null,
+): WorkModalState {
+  const currentScoresById = new Map(
+    current.ratingDimensions.map((dimension) => [dimension.id, dimension]),
+  );
+
+  return {
+    ...current,
+    categoryId,
+    ratingDimensions: getWorkModalTemplates(library, categoryId).map(
+      (template) => {
+        const currentDimension = currentScoresById.get(template.id);
+
+        return {
+          id: template.id,
+          name: template.name,
+          score: currentDimension?.score ?? "0",
+          weight: String(template.weight),
+        };
+      },
+    ),
+  };
+}
+
+function createDimensionDraftsFromTemplates(
+  templates: RatingDimensionTemplate[],
+): RatingDimensionDraft[] {
+  return templates.map((template) => ({
+    id: template.id,
+    name: template.name,
+    score: "0",
+    weight: String(template.weight),
+  }));
+}
+
+function getWorkModalTemplates(
+  library: TasteLibrary,
+  categoryId: string | null,
+): RatingDimensionTemplate[] {
+  if (!categoryId) {
+    return [];
+  }
+
+  const rootCategoryId = getCategoryRootId(library, categoryId) ?? categoryId;
+  return (
+    library.categories.find((category) => category.id === rootCategoryId)
+      ?.ratingDimensionTemplates ?? []
+  );
+}
+
+function resolveWorkModalRootId(
+  library: TasteLibrary,
+  categoryId: string | null,
+): string | null {
+  if (!categoryId) {
+    return null;
+  }
+
+  return getCategoryRootId(library, categoryId) ?? categoryId;
 }
 
 function createDimensionDrafts(

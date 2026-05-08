@@ -60,13 +60,16 @@ export interface LibraryController {
   selectWork(workId: string | null): void;
   selectRanking(rankingId: string | null): void;
   selectTierList(tierListId: string | null): void;
-  createCategory(name: string, parentCategoryId?: string | null): Promise<void>;
+  createCategory(
+    name: string,
+    parentCategoryId?: string | null,
+  ): Promise<string>;
   renameSelectedCategory(name: string): Promise<void>;
   updateSelectedCategoryRatingDimensions(
     templates: RatingDimensionTemplate[],
   ): Promise<void>;
   deleteSelectedCategory(): Promise<void>;
-  createWork(title: string): Promise<void>;
+  createWork(title: string): Promise<string>;
   updateSelectedWork(input: WorkUpdateInput): Promise<void>;
   deleteSelectedWork(): Promise<void>;
   storeSelectedWorkCover(fileName: string, bytes: Uint8Array): Promise<void>;
@@ -367,12 +370,25 @@ export function createLibraryController(
     },
 
     async createCategory(name, parentCategoryId) {
+      const previousCategoryIds = new Set(
+        state.library.categories.map((category) => category.id),
+      );
       const nextLibrary = createCategoryAction(
         state.library,
         name,
         parentCategoryId,
       );
+      const createdCategory = nextLibrary.categories.find(
+        (category) => !previousCategoryIds.has(category.id),
+      );
+
       await saveLibrary(nextLibrary);
+
+      if (!createdCategory) {
+        throw new Error("Category creation failed.");
+      }
+
+      return createdCategory.id;
     },
 
     async renameSelectedCategory(name) {
@@ -430,6 +446,8 @@ export function createLibraryController(
         selectedRankingId: state.selectedRankingId,
         selectedTierListId: state.selectedTierListId,
       });
+
+      return result.work.id;
     },
 
     async updateSelectedWork(input) {
