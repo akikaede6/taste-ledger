@@ -14,12 +14,14 @@ import {
   Layers,
   ListPlus,
   Loader2,
+  Menu,
   Pencil,
   LayoutDashboard,
   Search,
   Share2,
   RefreshCw,
   Save,
+  Plus,
   Star,
   Trash2,
   Trophy,
@@ -185,11 +187,46 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   const [exportDialog, setExportDialog] = useState<ExportDialogState | null>(
     null,
   );
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isCompactLayout, setIsCompactLayout] = useState(
+    () => window.innerWidth <= 860,
+  );
   const [exportPreferences, setExportPreferences] = useState<ExportPreferences>(
     () => loadExportPreferences(),
   );
   const [storageDirectory, setStorageDirectory] = useState<string | null>(null);
   const desktopBridge = getDesktopBridge();
+
+  useEffect(() => {
+    function updateLayoutMode() {
+      const nextIsCompactLayout = window.innerWidth <= 860;
+      setIsCompactLayout(nextIsCompactLayout);
+
+      if (!nextIsCompactLayout) {
+        setIsMobileSidebarOpen(false);
+      }
+    }
+
+    updateLayoutMode();
+    window.addEventListener("resize", updateLayoutMode);
+
+    return () => {
+      window.removeEventListener("resize", updateLayoutMode);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileSidebarOpen || !isCompactLayout) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMobileSidebarOpen, isCompactLayout]);
 
   const categoryTree = useMemo(
     () => getCategoryTree(state.library),
@@ -418,11 +455,13 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   }
 
   function openRootCategoryModal() {
+    setIsMobileSidebarOpen(false);
     setCategoryModal(createRootCategoryModalState());
     setActiveModal("category");
   }
 
   function openChildCategoryModal(parentCategoryId: string) {
+    setIsMobileSidebarOpen(false);
     setCategoryModal(createChildCategoryModalState(parentCategoryId));
     setActiveModal("category");
   }
@@ -511,6 +550,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   }
 
   function openCreateWorkModal() {
+    setIsMobileSidebarOpen(false);
     const categoryId =
       selectedCategory?.id ?? selectedRootCategory?.id ?? rootCategories[0]?.id;
     setWorkModal(
@@ -523,6 +563,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   }
 
   function openEditWorkModal(work: Work) {
+    setIsMobileSidebarOpen(false);
     controller.selectWork(work.id);
     setWorkModal(
       createEditWorkModalState({
@@ -616,6 +657,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   }
 
   function handleOpenWorkDetail(workId: string) {
+    setIsMobileSidebarOpen(false);
     controller.selectWork(workId);
     setActiveView("work");
   }
@@ -721,11 +763,25 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   }
 
   function handleSelectCategory(categoryId: string) {
+    setIsMobileSidebarOpen(false);
     controller.selectCategory(categoryId);
 
     if (activeView === "work") {
       setActiveView("dashboard");
     }
+  }
+
+  function handleSelectView(view: WorkspaceView) {
+    setIsMobileSidebarOpen(false);
+    setActiveView(view);
+  }
+
+  function toggleMobileSidebar() {
+    setIsMobileSidebarOpen((current) => !current);
+  }
+
+  function closeMobileSidebar() {
+    setIsMobileSidebarOpen(false);
   }
 
   async function handleCreateTierList(event: FormEvent<HTMLFormElement>) {
@@ -987,13 +1043,39 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar" aria-label="分类">
+      {isCompactLayout && isMobileSidebarOpen ? (
+        <button
+          className="mobile-sidebar-overlay"
+          type="button"
+          aria-label="关闭分类栏"
+          onClick={closeMobileSidebar}
+        />
+      ) : null}
+
+      <aside
+        className={
+          isCompactLayout && isMobileSidebarOpen
+            ? "sidebar mobile-open"
+            : "sidebar"
+        }
+        aria-label="分类"
+      >
         <div className="brand-row">
           <Library aria-hidden="true" size={24} />
           <div>
             <p className="eyebrow">Taste Ledger</p>
             <h1>Taste Ledger</h1>
           </div>
+          {isCompactLayout ? (
+            <button
+              className="mobile-sidebar-close"
+              type="button"
+              aria-label="关闭分类栏"
+              onClick={closeMobileSidebar}
+            >
+              <X aria-hidden="true" size={18} />
+            </button>
+          ) : null}
         </div>
 
         {desktopBridge ? (
@@ -1024,7 +1106,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                 : "workspace-nav-button"
             }
             type="button"
-            onClick={() => setActiveView("dashboard")}
+            onClick={() => handleSelectView("dashboard")}
           >
             <LayoutDashboard aria-hidden="true" size={16} />
             仪表盘
@@ -1036,7 +1118,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                 : "workspace-nav-button"
             }
             type="button"
-            onClick={() => setActiveView("rankings")}
+            onClick={() => handleSelectView("rankings")}
           >
             <BarChart3 aria-hidden="true" size={16} />
             排行榜
@@ -1048,7 +1130,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                 : "workspace-nav-button"
             }
             type="button"
-            onClick={() => setActiveView("sharing")}
+            onClick={() => handleSelectView("sharing")}
           >
             <Share2 aria-hidden="true" size={16} />
             导出预览
@@ -1084,35 +1166,47 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
 
       <section className="workspace">
         <header className="workspace-header">
-          <div>
-            <p className="eyebrow">{activeViewTitle}</p>
-            <h2>
-              {dashboardView
-                ? (selectedCategory?.name ?? "创建第一个分类")
-                : workDetailView
-                  ? (selectedWork?.title ?? "作品详情")
-                  : activeViewTitle}
-            </h2>
-            <p className="workspace-subtitle">{activeViewSubtitle}</p>
-            {dashboardView && selectedCategory ? (
-              <p className="workspace-path">{selectedCategoryPath}</p>
+          <div className="workspace-header-title">
+            {isCompactLayout ? (
+              <button
+                className="mobile-menu-trigger"
+                type="button"
+                aria-label="打开分类栏"
+                onClick={toggleMobileSidebar}
+              >
+                <Menu aria-hidden="true" size={20} />
+              </button>
             ) : null}
-            {workDetailView && selectedWorkCategoryPath ? (
-              <p className="workspace-path">{selectedWorkCategoryPath}</p>
-            ) : null}
-            {dashboardView &&
-            selectedRootCategory &&
-            selectedCategory &&
-            selectedRootCategory.id !== selectedCategory.id ? (
-              <p className="workspace-note">
-                评分维度和排行由「{selectedRootCategory.name}」共享。
-              </p>
-            ) : null}
-            {(rankingsView || sharingView) && selectedRootCategory ? (
-              <p className="workspace-path">
-                当前大分类：{selectedRootCategory.name}
-              </p>
-            ) : null}
+            <div className="workspace-header-copy">
+              <p className="eyebrow">{activeViewTitle}</p>
+              <h2>
+                {dashboardView
+                  ? (selectedCategory?.name ?? "创建第一个分类")
+                  : workDetailView
+                    ? (selectedWork?.title ?? "作品详情")
+                    : activeViewTitle}
+              </h2>
+              <p className="workspace-subtitle">{activeViewSubtitle}</p>
+              {dashboardView && selectedCategory ? (
+                <p className="workspace-path">{selectedCategoryPath}</p>
+              ) : null}
+              {workDetailView && selectedWorkCategoryPath ? (
+                <p className="workspace-path">{selectedWorkCategoryPath}</p>
+              ) : null}
+              {dashboardView &&
+              selectedRootCategory &&
+              selectedCategory &&
+              selectedRootCategory.id !== selectedCategory.id ? (
+                <p className="workspace-note">
+                  评分维度和排行由「{selectedRootCategory.name}」共享。
+                </p>
+              ) : null}
+              {(rankingsView || sharingView) && selectedRootCategory ? (
+                <p className="workspace-path">
+                  当前大分类：{selectedRootCategory.name}
+                </p>
+              ) : null}
+            </div>
           </div>
           <div className="workspace-header-actions">
             {dashboardView ? (
@@ -1132,7 +1226,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
               <button
                 className="text-button"
                 type="button"
-                onClick={() => setActiveView("dashboard")}
+                onClick={() => handleSelectView("dashboard")}
               >
                 <ArrowLeft aria-hidden="true" size={16} />
                 返回仪表盘
@@ -1562,7 +1656,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                 <button
                   className="text-button"
                   type="button"
-                  onClick={() => setActiveView("dashboard")}
+                  onClick={() => handleSelectView("dashboard")}
                 >
                   返回仪表盘
                 </button>
@@ -1960,6 +2054,62 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
               </div>
             </div>
           </div>
+        ) : null}
+
+        {isCompactLayout ? (
+          <nav className="mobile-bottom-nav" aria-label="移动端导航">
+            <button
+              className={
+                dashboardView ? "mobile-nav-item selected" : "mobile-nav-item"
+              }
+              type="button"
+              aria-pressed={dashboardView}
+              onClick={() => handleSelectView("dashboard")}
+            >
+              <LayoutDashboard aria-hidden="true" size={20} />
+              <span>仪表盘</span>
+            </button>
+            <button
+              className={
+                rankingsView ? "mobile-nav-item selected" : "mobile-nav-item"
+              }
+              type="button"
+              aria-pressed={rankingsView}
+              onClick={() => handleSelectView("rankings")}
+            >
+              <BarChart3 aria-hidden="true" size={20} />
+              <span>排行榜</span>
+            </button>
+            <button
+              className="mobile-nav-action"
+              type="button"
+              aria-label="添加作品"
+              onClick={openCreateWorkModal}
+              disabled={rootCategories.length === 0}
+            >
+              <Plus aria-hidden="true" size={24} />
+            </button>
+            <button
+              className={
+                sharingView ? "mobile-nav-item selected" : "mobile-nav-item"
+              }
+              type="button"
+              aria-pressed={sharingView}
+              onClick={() => handleSelectView("sharing")}
+            >
+              <Share2 aria-hidden="true" size={20} />
+              <span>分享</span>
+            </button>
+            <button
+              className="mobile-nav-item"
+              type="button"
+              aria-label="打开分类栏"
+              onClick={toggleMobileSidebar}
+            >
+              <Menu aria-hidden="true" size={20} />
+              <span>分类</span>
+            </button>
+          </nav>
         ) : null}
       </section>
     </main>
