@@ -102,7 +102,7 @@ export async function buildWorkSharePayload(
   variant: WorkShareVariant,
   coverDataUrl: string | null = null,
   coverOptions: ShareCoverOptions = DEFAULT_SHARE_COVER_OPTIONS,
-): WorkSharePayload {
+): Promise<WorkSharePayload> {
   const work = library.works.find((item) => item.id === workId);
 
   if (!work) {
@@ -256,7 +256,7 @@ export async function buildTierListSharePayload(
   tierListId: string,
   coverImages: Map<string, string> = new Map(),
   coverOptions: ShareCoverOptions = DEFAULT_SHARE_COVER_OPTIONS,
-): TierListSharePayload {
+): Promise<TierListSharePayload> {
   const tierList = library.tierLists.find((item) => item.id === tierListId);
 
   if (!tierList) {
@@ -323,7 +323,7 @@ export async function buildTierListSharePayload(
 export async function buildTierListPreviewSharePayload(
   input: TierListPreviewShareInput,
   coverOptions: ShareCoverOptions = DEFAULT_SHARE_COVER_OPTIONS,
-): TierListSharePayload {
+): Promise<TierListSharePayload> {
   const coverImages = input.coverImages ?? new Map<string, string>();
   const workById = new Map(input.works.map((work) => [work.id, work] as const));
   const levels = await Promise.all(
