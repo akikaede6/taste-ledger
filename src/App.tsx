@@ -35,6 +35,7 @@ import {
   type ReactElement,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { sortTierListsByRecentUpdate } from "./core/library-actions";
@@ -73,8 +74,10 @@ import { createLibraryRepository } from "./core/repository";
 import { calculateFinalScore } from "./core/scoring";
 import type { ShareImageFile, WorkShareVariant } from "./core/share-export";
 import {
+  DEFAULT_SHARE_COVER_OPTIONS,
   createRankingPreviewShareImage,
   createTierListPreviewShareImage,
+  type ShareCoverOptions,
 } from "./core/share-export";
 import { createRuntimeBackend } from "./platform/runtime-backend";
 import { getDesktopBridge } from "./platform/runtime-bridge";
@@ -90,10 +93,18 @@ interface ExportDialogState {
   previewUrl: string;
   fileNameBase: string;
   canRasterize: boolean;
+  supportsCoverMosaic: boolean;
+  coverMosaic: boolean;
+  mosaicLevel: number;
+  isRefreshing: boolean;
 }
 
 interface ExportPreferences {
   directory: string | null;
+}
+
+interface ExportShareBuilder {
+  (options: ShareCoverOptions): Promise<ShareImageFile>;
 }
 
 type ScoreRankingMode = Exclude<RankingMode, "manual">;
@@ -196,6 +207,8 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   );
   const [storageDirectory, setStorageDirectory] = useState<string | null>(null);
   const desktopBridge = getDesktopBridge();
+  const exportShareBuilderRef = useRef<ExportShareBuilder | null>(null);
+  const exportDialogRequestIdRef = useRef(0);
 
   useEffect(() => {
     function updateLayoutMode() {
@@ -689,30 +702,112 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     });
   }
 
-  async function openExportDialog(
+  function buildExportDialogState(
     title: string,
-    createShareFile: () => Promise<ShareImageFile>,
-  ) {
-    const shareFile = await runAction(createShareFile);
-
-    if (!shareFile) {
-      return;
-    }
-
+    shareFile: ShareImageFile,
+    supportsCoverMosaic: boolean,
+    coverMosaic: boolean,
+    mosaicLevel: number,
+    isRefreshing = false,
+  ): ExportDialogState {
     const svgText = new TextDecoder().decode(shareFile.bytes);
-    setExportDialog({
+
+    return {
       title,
       svgText,
       previewUrl: createSvgDataUrl(svgText),
       fileNameBase: sanitizeExportFileStem(shareFile.id),
       canRasterize: canRasterizeSvgForExport(),
-    });
+      supportsCoverMosaic,
+      coverMosaic,
+      mosaicLevel,
+      isRefreshing,
+    };
+  }
+
+  async function openExportDialog(
+    title: string,
+    supportsCoverMosaic: boolean,
+    createShareFile: ExportShareBuilder,
+  ) {
+    exportShareBuilderRef.current = createShareFile;
+    const requestId = ++exportDialogRequestIdRef.current;
+    const shareFile = await runAction(() =>
+      createShareFile(DEFAULT_SHARE_COVER_OPTIONS),
+    );
+
+    if (!shareFile || requestId !== exportDialogRequestIdRef.current) {
+      return;
+    }
+
+    setExportDialog(
+      buildExportDialogState(
+        title,
+        shareFile,
+        supportsCoverMosaic,
+        DEFAULT_SHARE_COVER_OPTIONS.coverMosaic,
+        DEFAULT_SHARE_COVER_OPTIONS.mosaicLevel,
+      ),
+    );
+  }
+
+  async function updateExportDialogCoverOptions(
+    coverOptions: ShareCoverOptions,
+  ) {
+    if (!exportDialog || !exportShareBuilderRef.current) {
+      return;
+    }
+
+    const requestId = ++exportDialogRequestIdRef.current;
+    setExportDialog((current) =>
+      current
+        ? {
+            ...current,
+            coverMosaic: coverOptions.coverMosaic,
+            mosaicLevel: coverOptions.mosaicLevel,
+            isRefreshing: true,
+          }
+        : current,
+    );
+
+    try {
+      const shareFile = await runAction(() =>
+        exportShareBuilderRef.current!(coverOptions),
+      );
+
+      if (!shareFile || requestId !== exportDialogRequestIdRef.current) {
+        return;
+      }
+
+      setExportDialog((current) =>
+        current
+          ? buildExportDialogState(
+              current.title,
+              shareFile,
+              current.supportsCoverMosaic,
+              coverOptions.coverMosaic,
+              coverOptions.mosaicLevel,
+            )
+          : current,
+      );
+    } finally {
+      if (requestId === exportDialogRequestIdRef.current) {
+        setExportDialog((current) =>
+          current
+            ? {
+                ...current,
+                isRefreshing: false,
+              }
+            : current,
+        );
+      }
+    }
   }
 
   async function handleExportWorkShare(variant: WorkShareVariant) {
     const label = variant === "cover" ? "作品封面图预览" : "作品长图预览";
-    await openExportDialog(label, () =>
-      controller.prepareSelectedWorkShare(variant),
+    await openExportDialog(label, true, (options) =>
+      controller.prepareSelectedWorkShare(variant, options),
     );
   }
 
@@ -729,7 +824,7 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
           )
         : null;
 
-    await openExportDialog("排行预览", async () =>
+    await openExportDialog("排行预览", false, async () =>
       createRankingPreviewShareImage({
         categoryName: selectedRootCategory.name,
         rankingName: "作品排行",
@@ -746,19 +841,24 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
       return;
     }
 
-    await openExportDialog("五级分级预览", async () =>
-      createTierListPreviewShareImage({
-        tierListId: selectedTierList.id,
-        tierListName: input.name,
-        categoryName: selectedRootCategory.name,
-        levels: input.levels,
-        works: sharedCategoryWorks,
-        coverImages: sharedCoverImageUrls,
-      }),
+    await openExportDialog("五级分级预览", true, (options) =>
+      createTierListPreviewShareImage(
+        {
+          tierListId: selectedTierList.id,
+          tierListName: input.name,
+          categoryName: selectedRootCategory.name,
+          levels: input.levels,
+          works: sharedCategoryWorks,
+          coverImages: sharedCoverImageUrls,
+        },
+        options,
+      ),
     );
   }
 
   function closeExportDialog() {
+    exportDialogRequestIdRef.current += 1;
+    exportShareBuilderRef.current = null;
     setExportDialog(null);
   }
 
@@ -2020,6 +2120,48 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                 ) : (
                   <p className="inline-hint">浏览器环境会直接下载文件。</p>
                 )}
+
+                {exportDialog.supportsCoverMosaic ? (
+                  <div className="export-option-panel">
+                    <label className="export-checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={exportDialog.coverMosaic}
+                        onChange={(event) =>
+                          void updateExportDialogCoverOptions({
+                            coverMosaic: event.currentTarget.checked,
+                            mosaicLevel: exportDialog.mosaicLevel,
+                          })
+                        }
+                      />
+                      <span>封面图马赛克</span>
+                    </label>
+
+                    <div className="export-option-slider">
+                      <div className="export-option-slider-header">
+                        <label htmlFor="export-mosaic-level">马赛克等级</label>
+                        <strong>{exportDialog.mosaicLevel}</strong>
+                      </div>
+                      <input
+                        id="export-mosaic-level"
+                        type="range"
+                        min="1"
+                        max="5"
+                        step="1"
+                        value={exportDialog.mosaicLevel}
+                        disabled={!exportDialog.coverMosaic}
+                        onChange={(event) =>
+                          void updateExportDialogCoverOptions({
+                            coverMosaic: true,
+                            mosaicLevel: Number(event.currentTarget.value),
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="inline-hint">当前导出不包含封面图。</p>
+                )}
               </div>
 
               <div className="button-row export-dialog-actions">
@@ -2028,20 +2170,22 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
                   type="button"
                   onClick={() => void handleCopyExportImage()}
                   disabled={
+                    exportDialog.isRefreshing ||
                     !exportDialog.canRasterize ||
                     (!desktopBridge && !canCopyImageToClipboard())
                   }
                 >
                   <ClipboardCopy aria-hidden="true" size={16} />
-                  复制图片
+                  {exportDialog.isRefreshing ? "更新中" : "复制图片"}
                 </button>
                 <button
                   className="text-button primary"
                   type="button"
                   onClick={() => void handleSaveExportFile()}
+                  disabled={exportDialog.isRefreshing}
                 >
                   <Download aria-hidden="true" size={16} />
-                  导出文件
+                  {exportDialog.isRefreshing ? "更新中" : "导出文件"}
                 </button>
                 <button
                   className="text-button"

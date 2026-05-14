@@ -52,6 +52,62 @@ export async function createDisplayImageDataUrl(
   }
 }
 
+export async function createMosaicImageDataUrl(
+  dataUrl: string,
+  level: number,
+): Promise<string> {
+  if (
+    typeof document === "undefined" ||
+    typeof Image === "undefined" ||
+    typeof window === "undefined"
+  ) {
+    return dataUrl;
+  }
+
+  const normalizedLevel = Math.max(1, Math.min(5, Math.round(level)));
+
+  try {
+    const image = await loadImage(dataUrl);
+    const width = Math.max(1, image.naturalWidth || image.width || 1080);
+    const height = Math.max(1, image.naturalHeight || image.height || 1080);
+    const downscaleFactor = 4 + (normalizedLevel - 1) * 2;
+    const reducedWidth = Math.max(1, Math.round(width / downscaleFactor));
+    const reducedHeight = Math.max(1, Math.round(height / downscaleFactor));
+
+    const downscaleCanvas = document.createElement("canvas");
+    downscaleCanvas.width = reducedWidth;
+    downscaleCanvas.height = reducedHeight;
+
+    const downscaleContext = downscaleCanvas.getContext("2d");
+
+    if (!downscaleContext) {
+      return dataUrl;
+    }
+
+    downscaleContext.imageSmoothingEnabled = true;
+    downscaleContext.clearRect(0, 0, reducedWidth, reducedHeight);
+    downscaleContext.drawImage(image, 0, 0, reducedWidth, reducedHeight);
+
+    const upscaleCanvas = document.createElement("canvas");
+    upscaleCanvas.width = width;
+    upscaleCanvas.height = height;
+
+    const upscaleContext = upscaleCanvas.getContext("2d");
+
+    if (!upscaleContext) {
+      return dataUrl;
+    }
+
+    upscaleContext.imageSmoothingEnabled = false;
+    upscaleContext.clearRect(0, 0, width, height);
+    upscaleContext.drawImage(downscaleCanvas, 0, 0, width, height);
+
+    return upscaleCanvas.toDataURL("image/png");
+  } catch {
+    return dataUrl;
+  }
+}
+
 export function createSvgDataUrl(svgText: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
 }

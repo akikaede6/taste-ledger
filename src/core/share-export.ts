@@ -8,9 +8,20 @@ import {
   type Work,
 } from "./model";
 import { getCategoryAncestorIds } from "./category-tree";
+import { createMosaicImageDataUrl } from "./image-utils";
+
+export interface ShareCoverOptions {
+  coverMosaic: boolean;
+  mosaicLevel: number;
+}
 
 export type WorkShareVariant = "cover" | "long";
 export type RankingShareVariant = "long";
+
+export const DEFAULT_SHARE_COVER_OPTIONS: ShareCoverOptions = {
+  coverMosaic: false,
+  mosaicLevel: 3,
+};
 
 export interface WorkSharePayload {
   variant: WorkShareVariant;
@@ -85,11 +96,12 @@ export interface TierListSharePayload {
 }
 
 const IMAGE_WIDTH = 1080;
-export function buildWorkSharePayload(
+export async function buildWorkSharePayload(
   library: Library,
   workId: string,
   variant: WorkShareVariant,
   coverDataUrl: string | null = null,
+  coverOptions: ShareCoverOptions = DEFAULT_SHARE_COVER_OPTIONS,
 ): WorkSharePayload {
   const work = library.works.find((item) => item.id === workId);
 
@@ -105,13 +117,18 @@ export function buildWorkSharePayload(
     throw new Error("Work category not found.");
   }
 
+  const displayCoverDataUrl =
+    coverDataUrl && coverOptions.coverMosaic
+      ? await createMosaicImageDataUrl(coverDataUrl, coverOptions.mosaicLevel)
+      : coverDataUrl;
+
   return {
     variant,
     workId: work.id,
     title: work.title,
     categoryName: category.name,
     coverImagePath: work.coverImagePath,
-    coverDataUrl,
+    coverDataUrl: displayCoverDataUrl,
     finalScore: work.finalScore,
     ratingDimensions: work.ratingDimensions,
     shortReview: trimToNull(work.shortReview),
@@ -119,16 +136,27 @@ export function buildWorkSharePayload(
   };
 }
 
-export function createWorkShareImage(
+export async function createWorkShareImage(
   library: Library,
   workId: string,
   variant: WorkShareVariant,
   coverDataUrl: string | null = null,
-): ShareImageFile {
-  const payload = buildWorkSharePayload(library, workId, variant, coverDataUrl);
+  coverOptions: ShareCoverOptions = DEFAULT_SHARE_COVER_OPTIONS,
+): Promise<ShareImageFile> {
+  const payload = await buildWorkSharePayload(
+    library,
+    workId,
+    variant,
+    coverDataUrl,
+    coverOptions,
+  );
+  const mosaicSuffix =
+    payload.coverDataUrl && coverOptions.coverMosaic
+      ? `-mosaic-${Math.max(1, Math.min(5, Math.round(coverOptions.mosaicLevel)))}`
+      : "";
 
   return {
-    id: `${payload.workId}-${payload.variant}-${Date.now()}`,
+    id: `${payload.workId}-${payload.variant}${mosaicSuffix}-${Date.now()}`,
     extension: "svg",
     bytes: new TextEncoder().encode(renderWorkShareSvg(payload)),
   };
@@ -223,10 +251,11 @@ export function createRankingPreviewShareImage(
   };
 }
 
-export function buildTierListSharePayload(
+export async function buildTierListSharePayload(
   library: Library,
   tierListId: string,
   coverImages: Map<string, string> = new Map(),
+  coverOptions: ShareCoverOptions = DEFAULT_SHARE_COVER_OPTIONS,
 ): TierListSharePayload {
   const tierList = library.tierLists.find((item) => item.id === tierListId);
 
@@ -242,30 +271,41 @@ export function buildTierListSharePayload(
     throw new Error("Tier list category not found.");
   }
 
-  const levels = tierList.levels.map((level) => ({
-    id: level.id,
-    name: level.name,
-    items: level.workIds.flatMap((workId) => {
-      const work = library.works.find((item) => item.id === workId);
+  const levels = await Promise.all(
+    tierList.levels.map(async (level) => ({
+      id: level.id,
+      name: level.name,
+      items: await Promise.all(
+        level.workIds.map(async (workId) => {
+          const work = library.works.find((item) => item.id === workId);
 
-      if (
-        !work ||
-        !isCategoryInScope(library, tierList.categoryId, work.categoryId)
-      ) {
-        return [];
-      }
+          if (
+            !work ||
+            !isCategoryInScope(library, tierList.categoryId, work.categoryId)
+          ) {
+            return null;
+          }
 
-      return [
-        {
-          title: work.title,
-          coverImagePath: work.coverImagePath,
-          coverDataUrl: work.coverImagePath
+          const coverDataUrl = work.coverImagePath
             ? (coverImages.get(work.id) ?? null)
-            : null,
-        },
-      ];
-    }),
-  }));
+            : null;
+          const displayCoverDataUrl =
+            coverDataUrl && coverOptions.coverMosaic
+              ? await createMosaicImageDataUrl(
+                  coverDataUrl,
+                  coverOptions.mosaicLevel,
+                )
+              : coverDataUrl;
+
+          return {
+            title: work.title,
+            coverImagePath: work.coverImagePath,
+            coverDataUrl: displayCoverDataUrl,
+          };
+        }),
+      ).then((items) => items.flatMap((item) => (item ? [item] : []))),
+    })),
+  );
 
   if (levels.every((level) => level.items.length === 0)) {
     throw new Error("Tier list has no assigned works.");
@@ -280,32 +320,44 @@ export function buildTierListSharePayload(
   };
 }
 
-export function buildTierListPreviewSharePayload(
+export async function buildTierListPreviewSharePayload(
   input: TierListPreviewShareInput,
+  coverOptions: ShareCoverOptions = DEFAULT_SHARE_COVER_OPTIONS,
 ): TierListSharePayload {
   const coverImages = input.coverImages ?? new Map<string, string>();
   const workById = new Map(input.works.map((work) => [work.id, work] as const));
-  const levels = input.levels.map((level) => ({
-    id: level.id,
-    name: normalizeTierLevelName(level),
-    items: level.workIds.flatMap((workId) => {
-      const work = workById.get(workId);
+  const levels = await Promise.all(
+    input.levels.map(async (level) => ({
+      id: level.id,
+      name: normalizeTierLevelName(level),
+      items: await Promise.all(
+        level.workIds.map(async (workId) => {
+          const work = workById.get(workId);
 
-      if (!work) {
-        return [];
-      }
+          if (!work) {
+            return null;
+          }
 
-      return [
-        {
-          title: work.title,
-          coverImagePath: work.coverImagePath,
-          coverDataUrl: work.coverImagePath
+          const coverDataUrl = work.coverImagePath
             ? (coverImages.get(work.id) ?? null)
-            : null,
-        },
-      ];
-    }),
-  }));
+            : null;
+          const displayCoverDataUrl =
+            coverDataUrl && coverOptions.coverMosaic
+              ? await createMosaicImageDataUrl(
+                  coverDataUrl,
+                  coverOptions.mosaicLevel,
+                )
+              : coverDataUrl;
+
+          return {
+            title: work.title,
+            coverImagePath: work.coverImagePath,
+            coverDataUrl: displayCoverDataUrl,
+          };
+        }),
+      ).then((items) => items.flatMap((item) => (item ? [item] : []))),
+    })),
+  );
 
   if (levels.every((level) => level.items.length === 0)) {
     throw new Error("Tier list has no assigned works.");
@@ -331,27 +383,48 @@ function isCategoryInScope(
   );
 }
 
-export function createTierListShareImage(
+export async function createTierListShareImage(
   library: Library,
   tierListId: string,
   coverImages: Map<string, string> = new Map(),
-): ShareImageFile {
-  const payload = buildTierListSharePayload(library, tierListId, coverImages);
+  coverOptions: ShareCoverOptions = DEFAULT_SHARE_COVER_OPTIONS,
+): Promise<ShareImageFile> {
+  const payload = await buildTierListSharePayload(
+    library,
+    tierListId,
+    coverImages,
+    coverOptions,
+  );
+  const mosaicSuffix = payload.levels.some((level) =>
+    level.items.some((item) => item.coverDataUrl !== null),
+  )
+    ? coverOptions.coverMosaic
+      ? `-mosaic-${Math.max(1, Math.min(5, Math.round(coverOptions.mosaicLevel)))}`
+      : ""
+    : "";
 
   return {
-    id: `${payload.tierListId}-${payload.variant}-${Date.now()}`,
+    id: `${payload.tierListId}-${payload.variant}${mosaicSuffix}-${Date.now()}`,
     extension: "svg",
     bytes: new TextEncoder().encode(renderTierListShareSvg(payload)),
   };
 }
 
-export function createTierListPreviewShareImage(
+export async function createTierListPreviewShareImage(
   input: TierListPreviewShareInput,
-): ShareImageFile {
-  const payload = buildTierListPreviewSharePayload(input);
+  coverOptions: ShareCoverOptions = DEFAULT_SHARE_COVER_OPTIONS,
+): Promise<ShareImageFile> {
+  const payload = await buildTierListPreviewSharePayload(input, coverOptions);
+  const mosaicSuffix = payload.levels.some((level) =>
+    level.items.some((item) => item.coverDataUrl !== null),
+  )
+    ? coverOptions.coverMosaic
+      ? `-mosaic-${Math.max(1, Math.min(5, Math.round(coverOptions.mosaicLevel)))}`
+      : ""
+    : "";
 
   return {
-    id: `${sanitizeFileStem(payload.tierListId)}-${payload.variant}-${Date.now()}`,
+    id: `${sanitizeFileStem(payload.tierListId)}-${payload.variant}${mosaicSuffix}-${Date.now()}`,
     extension: "svg",
     bytes: new TextEncoder().encode(renderTierListShareSvg(payload)),
   };

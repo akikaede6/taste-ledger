@@ -1578,6 +1578,63 @@ select:disabled {
   margin: 0;
 }
 
+.export-option-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.export-checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #0f172a;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.export-checkbox-row input {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: #0f172a;
+}
+
+.export-option-slider {
+  display: grid;
+  gap: 8px;
+}
+
+.export-option-slider-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.export-option-slider-header label {
+  margin: 0;
+}
+
+.export-option-slider-header strong {
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.export-option-slider input[type="range"] {
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .export-directory-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2224,7 +2281,8 @@ select:disabled {
   }
 
   .export-directory-row,
-  .dimension-header {
+  .dimension-header,
+  .export-option-slider-header {
     display: grid;
   }
 

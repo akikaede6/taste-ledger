@@ -38,6 +38,8 @@ import {
   createRankingShareImage,
   createTierListShareImage,
   createWorkShareImage,
+  DEFAULT_SHARE_COVER_OPTIONS,
+  type ShareCoverOptions,
   type ShareImageFile,
   type WorkShareVariant,
 } from "./share-export";
@@ -73,7 +75,10 @@ export interface LibraryController {
   updateSelectedWork(input: WorkUpdateInput): Promise<void>;
   deleteSelectedWork(): Promise<void>;
   storeSelectedWorkCover(fileName: string, bytes: Uint8Array): Promise<void>;
-  prepareSelectedWorkShare(variant: WorkShareVariant): Promise<ShareImageFile>;
+  prepareSelectedWorkShare(
+    variant: WorkShareVariant,
+    coverOptions?: ShareCoverOptions,
+  ): Promise<ShareImageFile>;
   exportSelectedWorkShare(variant: WorkShareVariant): Promise<string>;
   prepareSelectedRankingShare(): Promise<ShareImageFile>;
   exportSelectedRankingShare(): Promise<string>;
@@ -512,7 +517,10 @@ export function createLibraryController(
       await saveLibrary(nextLibrary);
     },
 
-    async prepareSelectedWorkShare(variant) {
+    async prepareSelectedWorkShare(
+      variant,
+      coverOptions = DEFAULT_SHARE_COVER_OPTIONS,
+    ) {
       const workId = state.selectedWorkId;
 
       if (!workId) {
@@ -534,6 +542,7 @@ export function createLibraryController(
         workId,
         variant,
         coverDataUrl ?? null,
+        coverOptions,
       );
     },
 

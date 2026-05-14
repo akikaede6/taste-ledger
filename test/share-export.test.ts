@@ -110,8 +110,12 @@ describe("work share export", () => {
     vi.useRealTimers();
   });
 
-  it("builds a cover payload without leaking the long review", () => {
-    const payload = buildWorkSharePayload(shareLibrary(), "work-a", "cover");
+  it("builds a cover payload without leaking the long review", async () => {
+    const payload = await buildWorkSharePayload(
+      shareLibrary(),
+      "work-a",
+      "cover",
+    );
 
     expect(payload).toMatchObject({
       variant: "cover",
@@ -123,9 +127,9 @@ describe("work share export", () => {
     });
   });
 
-  it("renders work exports in the reference card style", () => {
+  it("renders work exports in the reference card style", async () => {
     const svg = renderWorkShareSvg(
-      buildWorkSharePayload(shareLibrary(), "work-a", "cover"),
+      await buildWorkSharePayload(shareLibrary(), "work-a", "cover"),
     );
 
     expect(svg).toContain('aria-label="作品 A"');
@@ -135,12 +139,12 @@ describe("work share export", () => {
     expect(svg).toContain("剧情");
   });
 
-  it("renders long review content only for long exports", () => {
+  it("renders long review content only for long exports", async () => {
     const coverSvg = renderWorkShareSvg(
-      buildWorkSharePayload(shareLibrary(), "work-a", "cover"),
+      await buildWorkSharePayload(shareLibrary(), "work-a", "cover"),
     );
     const longSvg = renderWorkShareSvg(
-      buildWorkSharePayload(shareLibrary(), "work-a", "long"),
+      await buildWorkSharePayload(shareLibrary(), "work-a", "long"),
     );
 
     expect(coverSvg).toContain("短评内容");
@@ -151,8 +155,8 @@ describe("work share export", () => {
     expect(longSvg).toContain("第二段");
   });
 
-  it("creates an svg image file for a work share export", () => {
-    const image = createWorkShareImage(shareLibrary(), "work-a", "cover");
+  it("creates an svg image file for a work share export", async () => {
+    const image = await createWorkShareImage(shareLibrary(), "work-a", "cover");
 
     expect(image.id).toMatch(/^work-a-cover-\d+$/);
     expect(image.extension).toBe("svg");
@@ -209,7 +213,7 @@ describe("work share export", () => {
     expect(image.extension).toBe("svg");
   });
 
-  it("builds a tier list preview payload from edited level names", () => {
+  it("builds a tier list preview payload from edited level names", async () => {
     const works = shareLibrary().works.map((work) =>
       work.id === "work-a"
         ? {
@@ -253,8 +257,8 @@ describe("work share export", () => {
       works,
       coverImages: new Map([["work-a", "data:image/png;base64,AAAA"]]),
     };
-    const payload = buildTierListPreviewSharePayload(input);
-    const image = createTierListPreviewShareImage(input);
+    const payload = await buildTierListPreviewSharePayload(input);
+    const image = await createTierListPreviewShareImage(input);
 
     expect(payload.tierListName).toBe("自定义分级");
     expect(payload.levels[0]?.name).toBe("神作");
@@ -298,7 +302,7 @@ describe("work share export", () => {
     );
   });
 
-  it("renders a tier list export with embedded cover data", () => {
+  it("renders a tier list export with embedded cover data", async () => {
     const library: Library = {
       ...shareLibrary(),
       works: shareLibrary().works.map((work) =>
@@ -347,13 +351,17 @@ describe("work share export", () => {
       ],
     };
     const coverImages = new Map([["work-a", "data:image/png;base64,AAAA"]]);
-    const payload = buildTierListSharePayload(
+    const payload = await buildTierListSharePayload(
       library,
       "tier-film",
       coverImages,
     );
     const svg = renderTierListShareSvg(payload);
-    const image = createTierListShareImage(library, "tier-film", coverImages);
+    const image = await createTierListShareImage(
+      library,
+      "tier-film",
+      coverImages,
+    );
 
     expect(payload.tierListName).toBe("五级分级");
     expect(payload.levels[0].items[0]).toMatchObject({
