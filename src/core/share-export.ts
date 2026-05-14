@@ -447,20 +447,35 @@ export function renderWorkShareSvg(payload: WorkSharePayload): string {
       : ["还没有写下评价。"];
   const visibleReviewLines =
     payload.variant === "cover" ? reviewLines.slice(0, 4) : reviewLines;
-  const dimensionRows = Math.max(1, Math.ceil(dimensions.length / 2));
-  const dimensionBlockHeight = dimensionRows * 146;
-  const reviewBlockHeight = Math.max(168, visibleReviewLines.length * 38 + 94);
-  const cardHeight = 438 + dimensionBlockHeight + 36 + reviewBlockHeight + 74;
-  const height = Math.max(
-    payload.variant === "cover" ? 1180 : 1320,
-    cardHeight + 72,
-  );
   const scoreLabel = formatShareScore(payload.finalScore);
   const coverLabel = payload.coverImagePath
     ? `封面已入库: ${payload.coverImagePath}`
     : "未设置封面";
   const recommendation = getRecommendationLabel(payload.finalScore);
-  const titleLines = wrapText(payload.title, 11).slice(0, 2);
+  const titleLayout = buildWorkShareTitleLayout(payload.title);
+  const titleBottom =
+    titleLayout.startY +
+    (titleLayout.lines.length - 1) * titleLayout.lineGap +
+    titleLayout.fontSize +
+    12;
+  const recommendationY = Math.max(264, titleBottom + 16);
+  const scoreY = recommendationY + 42;
+  const summaryY = scoreY + 62;
+  const dimensionsTop = Math.max(426, summaryY + 58);
+  const dimensionRows = Math.max(1, Math.ceil(dimensions.length / 2));
+  const dimensionBlockHeight = dimensionRows * 146;
+  const reviewBlockHeight = Math.max(168, visibleReviewLines.length * 38 + 94);
+  const cardHeight =
+    438 +
+    (dimensionsTop - 426) +
+    dimensionBlockHeight +
+    36 +
+    reviewBlockHeight +
+    74;
+  const height = Math.max(
+    payload.variant === "cover" ? 1180 : 1320,
+    cardHeight + 72,
+  );
   const parts: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${IMAGE_WIDTH}" height="${height}" viewBox="0 0 ${IMAGE_WIDTH} ${height}" role="img" aria-label="${escapeXml(
       payload.title,
@@ -491,28 +506,28 @@ export function renderWorkShareSvg(payload: WorkSharePayload): string {
     )}</text>`,
   );
 
-  titleLines.forEach((line, index) => {
+  titleLayout.lines.forEach((line, index) => {
     parts.push(
-      `<text x="710" y="${188 + index * 54}" fill="#3f3f46" font-family="system-ui, sans-serif" font-size="44" font-weight="900" text-anchor="middle">${escapeXml(
+      `<text x="710" y="${titleLayout.startY + index * titleLayout.lineGap}" fill="#3f3f46" font-family="system-ui, sans-serif" font-size="${titleLayout.fontSize}" font-weight="900" text-anchor="middle">${escapeXml(
         line,
       )}</text>`,
     );
   });
 
   parts.push(
-    `<text x="448" y="306" fill="#3f3f46" font-family="system-ui, sans-serif" font-size="82" font-weight="900">${escapeXml(
+    `<text x="448" y="${scoreY}" fill="#3f3f46" font-family="system-ui, sans-serif" font-size="82" font-weight="900">${escapeXml(
       scoreLabel,
     )}</text>`,
-    `<text x="690" y="264" fill="#ff4f73" font-family="system-ui, sans-serif" font-size="32" font-weight="900">${escapeXml(
+    `<text x="690" y="${recommendationY}" fill="#ff4f73" font-family="system-ui, sans-serif" font-size="32" font-weight="900">${escapeXml(
       recommendation,
     )}</text>`,
-    renderStarRow(payload.finalScore, 686, 312, 32, 12),
-    `<text x="448" y="368" fill="#6b7280" font-family="system-ui, sans-serif" font-size="22" font-weight="700">${escapeXml(
+    renderStarRow(payload.finalScore, 686, scoreY + 6, 32, 12),
+    `<text x="448" y="${summaryY}" fill="#6b7280" font-family="system-ui, sans-serif" font-size="22" font-weight="700">${escapeXml(
       `整体完成度很高，适合加入 ${payload.categoryName} 推荐名单。`,
     )}</text>`,
   );
 
-  let cursor = 426;
+  let cursor = dimensionsTop;
 
   if (dimensions.length > 0) {
     dimensions.forEach((dimension, index) => {
@@ -589,6 +604,70 @@ function buildRankingSharePayloadFromSource(source: {
       title: work.title,
       scoreLabel: getRankingScoreLabel(source.mode, source.dimensionId, work),
     })),
+  };
+}
+
+function buildWorkShareTitleLayout(value: string): {
+  lines: string[];
+  fontSize: number;
+  lineGap: number;
+  startY: number;
+} {
+  const title = value.trim() || "未命名作品";
+  const presets = [
+    {
+      maxLength: 12,
+      fontSize: 44,
+      lineGap: 54,
+      startY: 188,
+      maxLines: 1,
+    },
+    {
+      maxLength: 14,
+      fontSize: 38,
+      lineGap: 46,
+      startY: 184,
+      maxLines: 2,
+    },
+    {
+      maxLength: 16,
+      fontSize: 34,
+      lineGap: 40,
+      startY: 180,
+      maxLines: 3,
+    },
+    {
+      maxLength: 18,
+      fontSize: 30,
+      lineGap: 36,
+      startY: 176,
+      maxLines: 3,
+    },
+  ];
+  const preset =
+    title.length <= 12
+      ? presets[0]
+      : title.length <= 28
+        ? presets[1]
+        : title.length <= 48
+          ? presets[2]
+          : presets[3];
+  const rawLines = wrapText(title, preset.maxLength);
+  const lines = rawLines.slice(0, preset.maxLines);
+
+  if (rawLines.length > preset.maxLines && lines.length > 0) {
+    const lastIndex = lines.length - 1;
+    lines[lastIndex] = `${lines[lastIndex].slice(
+      0,
+      Math.max(0, preset.maxLength - 3),
+    )}...`;
+  }
+
+  return {
+    lines,
+    fontSize: preset.fontSize,
+    lineGap: preset.lineGap,
+    startY: preset.startY,
   };
 }
 

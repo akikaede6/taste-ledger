@@ -139,6 +139,47 @@ describe("work share export", () => {
     expect(svg).toContain("剧情");
   });
 
+  it("shrinks long work titles before the recommendation label", async () => {
+    const longTitle =
+      "这是一个非常非常非常非常非常非常非常长的作品标题用于测试自动缩放";
+    const library: Library = {
+      ...shareLibrary(),
+      works: shareLibrary().works.map((work) =>
+        work.id === "work-a"
+          ? {
+              ...work,
+              title: longTitle,
+              finalScore: 5,
+            }
+          : work,
+      ),
+    };
+    const svg = renderWorkShareSvg(
+      await buildWorkSharePayload(library, "work-a", "cover"),
+    );
+    const titleMatches = [
+      ...svg.matchAll(
+        /<text x="710" y="(\d+)" fill="#3f3f46" font-family="system-ui, sans-serif" font-size="(\d+)" font-weight="900" text-anchor="middle">([^<]+)<\/text>/g,
+      ),
+    ];
+    const recommendationMatch = svg.match(
+      /<text x="690" y="(\d+)" fill="#ff4f73" font-family="system-ui, sans-serif" font-size="32" font-weight="900">神推<\/text>/,
+    );
+
+    expect(titleMatches.length).toBeGreaterThan(1);
+    expect(
+      Math.max(...titleMatches.map((match) => Number(match[2]))),
+    ).toBeLessThan(44);
+    expect(recommendationMatch).not.toBeNull();
+
+    const lastTitleMatch = titleMatches[titleMatches.length - 1]!;
+    const lastTitleY = Number(lastTitleMatch[1]);
+    const lastTitleFontSize = Number(lastTitleMatch[2]);
+    const recommendationY = Number(recommendationMatch![1]);
+
+    expect(lastTitleY + lastTitleFontSize + 4).toBeLessThan(recommendationY);
+  });
+
   it("renders long review content only for long exports", async () => {
     const coverSvg = renderWorkShareSvg(
       await buildWorkSharePayload(shareLibrary(), "work-a", "cover"),
