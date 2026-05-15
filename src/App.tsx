@@ -1,6 +1,17 @@
 import type { WorkspaceView } from "./types/ui";
 import { MobileBottomNavigation } from "./components/layout/MobileBottomNavigation";
 import { Sidebar } from "./components/layout/Sidebar";
+import { useCoverImageUrls } from "./hooks/useCoverImageUrls";
+import {
+  createDimensionDrafts,
+  createDimensionDraftsFromTemplates,
+  createNewTemplateDraft,
+  readDimensionDrafts,
+  readTemplateDrafts,
+  type RatingDimensionDraft,
+  type RatingTemplateDraft,
+} from "./components/rating/ratingDrafts";
+import { CategoryDimensionEditor } from "./components/category/CategoryDimensionEditor";
 import {
   ArrowLeft,
   BarChart3,
@@ -2035,176 +2046,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   );
 }
 
-interface CategoryDimensionEditorProps {
-  category: Category;
-  onSave(templates: RatingDimensionTemplate[]): Promise<void>;
-}
-
-interface RatingTemplateDraft {
-  id: string;
-  name: string;
-  weight: string;
-}
-
-interface RatingTemplateDraftState {
-  errorMessage: string | null;
-  templates: RatingDimensionTemplate[];
-}
-
-function CategoryDimensionEditor({
-  category,
-  onSave,
-}: CategoryDimensionEditorProps) {
-  const [drafts, setDrafts] = useState<RatingTemplateDraft[]>(() =>
-    createTemplateDrafts(category.ratingDimensionTemplates),
-  );
-  const [draftError, setDraftError] = useState<string | null>(null);
-  const templateState = useMemo(() => readTemplateDrafts(drafts), [drafts]);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (templateState.errorMessage) {
-      setDraftError(templateState.errorMessage);
-      return;
-    }
-
-    setDraftError(null);
-    await onSave(templateState.templates);
-  }
-
-  function updateTemplateDraft(
-    id: string,
-    field: keyof Omit<RatingTemplateDraft, "id">,
-    value: string,
-  ) {
-    setDraftError(null);
-    setDrafts((current) =>
-      current.map((draft) =>
-        draft.id === id
-          ? {
-              ...draft,
-              [field]: value,
-            }
-          : draft,
-      ),
-    );
-  }
-
-  function addTemplateDraft() {
-    setDraftError(null);
-    setDrafts((current) => [
-      ...current,
-      createNewTemplateDraft(current.length),
-    ]);
-  }
-
-  function removeTemplateDraft(id: string) {
-    setDraftError(null);
-    setDrafts((current) => current.filter((draft) => draft.id !== id));
-  }
-
-  return (
-    <form
-      className="category-dimension-editor"
-      noValidate
-      onSubmit={(event) => void handleSubmit(event)}
-    >
-      <div className="dimension-header">
-        <h4>统一评分维度</h4>
-        <button
-          className="text-button"
-          type="button"
-          onClick={addTemplateDraft}
-        >
-          <ListPlus aria-hidden="true" size={16} />
-          添加评分维度
-        </button>
-      </div>
-
-      {drafts.length > 0 ? (
-        <div className="dimension-list">
-          {drafts.map((draft, index) => {
-            const number = index + 1;
-            const nameId = `${category.id}-${draft.id}-template-name`;
-            const weightId = `${category.id}-${draft.id}-template-weight`;
-
-            return (
-              <div className="dimension-row template-row" key={draft.id}>
-                <div className="dimension-field">
-                  <label htmlFor={nameId}>维度名称 {number}</label>
-                  <input
-                    id={nameId}
-                    value={draft.name}
-                    onChange={(event) =>
-                      updateTemplateDraft(
-                        draft.id,
-                        "name",
-                        event.currentTarget.value,
-                      )
-                    }
-                  />
-                </div>
-                <div className="dimension-field">
-                  <label htmlFor={weightId}>权重 {number}</label>
-                  <input
-                    id={weightId}
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={draft.weight}
-                    onChange={(event) =>
-                      updateTemplateDraft(
-                        draft.id,
-                        "weight",
-                        event.currentTarget.value,
-                      )
-                    }
-                  />
-                </div>
-                <button
-                  className="icon-button danger dimension-remove"
-                  type="button"
-                  aria-label={`删除评分维度 ${number}`}
-                  onClick={() => removeTemplateDraft(draft.id)}
-                >
-                  <Trash2 aria-hidden="true" size={16} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="muted">这个大分类还没有评分维度。</p>
-      )}
-
-      {draftError ? (
-        <p className="inline-error" role="alert">
-          {draftError}
-        </p>
-      ) : null}
-
-      <button className="text-button primary" type="submit">
-        <Save aria-hidden="true" size={16} />
-        保存评分维度
-      </button>
-    </form>
-  );
-}
-
-interface RatingDimensionDraft {
-  id: string;
-  name: string;
-  score: string;
-  weight: string;
-}
-
-interface RatingDimensionDraftState {
-  errorMessage: string | null;
-  finalScore: number | null;
-  ratingDimensions: RatingDimensionScore[];
-}
-
 interface CategoryModalProps {
   state: CategoryModalState;
   library: TasteLibrary;
@@ -3318,17 +3159,6 @@ function syncWorkModalCategory(
   };
 }
 
-function createDimensionDraftsFromTemplates(
-  templates: RatingDimensionTemplate[],
-): RatingDimensionDraft[] {
-  return templates.map((template) => ({
-    id: template.id,
-    name: template.name,
-    score: "0",
-    weight: String(template.weight),
-  }));
-}
-
 function getWorkModalTemplates(
   library: TasteLibrary,
   categoryId: string | null,
@@ -3353,153 +3183,6 @@ function resolveWorkModalRootId(
   }
 
   return getCategoryRootId(library, categoryId) ?? categoryId;
-}
-
-function createDimensionDrafts(
-  ratingDimensions: RatingDimensionScore[],
-): RatingDimensionDraft[] {
-  return ratingDimensions.map((dimension) => ({
-    id: dimension.id,
-    name: dimension.name,
-    score: String(dimension.score),
-    weight: String(dimension.weight),
-  }));
-}
-
-function createTemplateDrafts(
-  templates: RatingDimensionTemplate[],
-): RatingTemplateDraft[] {
-  return templates.map((template) => ({
-    id: template.id,
-    name: template.name,
-    weight: String(template.weight),
-  }));
-}
-
-function createNewTemplateDraft(index: number): RatingTemplateDraft {
-  return {
-    id: `template-${crypto.randomUUID()}`,
-    name: `维度 ${index + 1}`,
-    weight: "1",
-  };
-}
-
-function readDimensionDrafts(
-  drafts: RatingDimensionDraft[],
-): RatingDimensionDraftState {
-  const seenIds = new Set<string>();
-  const ratingDimensions: RatingDimensionScore[] = [];
-
-  for (const [index, draft] of drafts.entries()) {
-    const number = index + 1;
-    const id = draft.id.trim();
-    const name = draft.name.trim();
-    const scoreText = draft.score.trim();
-    const weightText = draft.weight.trim();
-
-    if (id.length === 0 || seenIds.has(id)) {
-      return failDimensionDraft(`评分维度 ${number} 无法保存。`);
-    }
-
-    seenIds.add(id);
-
-    if (name.length === 0) {
-      return failDimensionDraft(`评分维度 ${number} 名称不能为空。`);
-    }
-
-    if (scoreText.length === 0) {
-      return failDimensionDraft(`评分维度 ${number} 评分不能为空。`);
-    }
-
-    const score = Number(scoreText);
-
-    if (!Number.isFinite(score) || score < 0) {
-      return failDimensionDraft(`评分维度 ${number} 评分必须是非负数字。`);
-    }
-
-    if (weightText.length === 0) {
-      return failDimensionDraft(`评分维度 ${number} 权重不能为空。`);
-    }
-
-    const weight = Number(weightText);
-
-    if (!Number.isFinite(weight) || weight <= 0) {
-      return failDimensionDraft(`评分维度 ${number} 权重必须大于 0。`);
-    }
-
-    ratingDimensions.push({
-      id,
-      name,
-      score,
-      weight,
-    });
-  }
-
-  return {
-    errorMessage: null,
-    finalScore: calculateFinalScore(ratingDimensions),
-    ratingDimensions,
-  };
-}
-
-function readTemplateDrafts(
-  drafts: RatingTemplateDraft[],
-): RatingTemplateDraftState {
-  const seenIds = new Set<string>();
-  const templates: RatingDimensionTemplate[] = [];
-
-  for (const [index, draft] of drafts.entries()) {
-    const number = index + 1;
-    const id = draft.id.trim();
-    const name = draft.name.trim();
-    const weightText = draft.weight.trim();
-
-    if (id.length === 0 || seenIds.has(id)) {
-      return failTemplateDraft(`评分维度 ${number} 无法保存。`);
-    }
-
-    seenIds.add(id);
-
-    if (name.length === 0) {
-      return failTemplateDraft(`评分维度 ${number} 名称不能为空。`);
-    }
-
-    if (weightText.length === 0) {
-      return failTemplateDraft(`评分维度 ${number} 权重不能为空。`);
-    }
-
-    const weight = Number(weightText);
-
-    if (!Number.isFinite(weight) || weight <= 0) {
-      return failTemplateDraft(`评分维度 ${number} 权重必须大于 0。`);
-    }
-
-    templates.push({
-      id,
-      name,
-      weight,
-    });
-  }
-
-  return {
-    errorMessage: null,
-    templates,
-  };
-}
-
-function failTemplateDraft(message: string): RatingTemplateDraftState {
-  return {
-    errorMessage: message,
-    templates: [],
-  };
-}
-
-function failDimensionDraft(message: string): RatingDimensionDraftState {
-  return {
-    errorMessage: message,
-    finalScore: null,
-    ratingDimensions: [],
-  };
 }
 
 function getRankingDimensionValue(
@@ -3625,58 +3308,6 @@ function parseTagText(value: string): string[] {
 
 function normalizeTagKey(value: string): string {
   return value.trim().toLocaleLowerCase();
-}
-
-function useCoverImageUrls(
-  repository: LibraryRepository,
-  works: Work[],
-): Map<string, string> {
-  const [urls, setUrls] = useState<Map<string, string>>(() => new Map());
-
-  useEffect(() => {
-    let cancelled = false;
-    const worksWithCovers = works.filter((work) => work.coverImagePath);
-
-    if (worksWithCovers.length === 0) {
-      void Promise.resolve().then(() => {
-        if (!cancelled) {
-          setUrls(new Map());
-        }
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    void Promise.all(
-      worksWithCovers.map(async (work) => {
-        if (!work.coverImagePath) {
-          return null;
-        }
-
-        const bytes = await repository.readImage(work.coverImagePath);
-
-        if (!bytes) {
-          return null;
-        }
-
-        return [
-          work.id,
-          await createDisplayImageDataUrl(work.coverImagePath, bytes),
-        ] as const;
-      }),
-    ).then((entries) => {
-      if (!cancelled) {
-        setUrls(new Map(entries.filter((entry) => entry !== null)));
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [repository, works]);
-
-  return urls;
 }
 
 function loadExportPreferences(): ExportPreferences {
