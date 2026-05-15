@@ -38,6 +38,7 @@ import {
 } from "./components/rankings/RankingHelpers";
 import { TierListEditor } from "./components/rankings/TierListEditor";
 import { RankingPreviewPanel } from "./components/rankings/RankingPreviewPanel";
+import { ExportDialog } from "./components/export/ExportDialog";
 import {
   ArrowLeft,
   BookOpen,
@@ -1845,141 +1846,20 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         ) : null}
 
         {exportDialog ? (
-          <div
-            className="export-overlay"
-            role="presentation"
-            onClick={closeExportDialog}
-          >
-            <div
-              className="export-dialog"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="export-dialog-title"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="export-dialog-header">
-                <div>
-                  <p className="eyebrow">导出预览</p>
-                  <h3 id="export-dialog-title">{exportDialog.title}</h3>
-                </div>
-                <button
-                  className="icon-button"
-                  type="button"
-                  aria-label="关闭导出预览"
-                  onClick={closeExportDialog}
-                >
-                  <X aria-hidden="true" size={16} />
-                </button>
-              </div>
-
-              <div className="export-dialog-preview">
-                <img src={exportDialog.previewUrl} alt={exportDialog.title} />
-              </div>
-
-              <div className="export-dialog-meta">
-                <p className="muted">
-                  预览文件：{exportDialog.fileNameBase}.
-                  {exportDialog.canRasterize ? "png" : "svg"}
-                </p>
-
-                {desktopBridge ? (
-                  <div className="export-directory-row">
-                    <div>
-                      <label>导出文件夹</label>
-                      <p className="export-directory-path">
-                        {exportPreferences.directory ?? "未选择"}
-                      </p>
-                    </div>
-                    <button
-                      className="text-button"
-                      type="button"
-                      onClick={() => void handleChooseExportDirectory()}
-                    >
-                      <FolderOpen aria-hidden="true" size={16} />
-                      选择文件夹
-                    </button>
-                  </div>
-                ) : (
-                  <p className="inline-hint">浏览器环境会直接下载文件。</p>
-                )}
-
-                {exportDialog.supportsCoverMosaic ? (
-                  <div className="export-option-panel">
-                    <label className="export-checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={exportDialog.coverMosaic}
-                        onChange={(event) =>
-                          void updateExportDialogCoverOptions({
-                            coverMosaic: event.currentTarget.checked,
-                            mosaicLevel: exportDialog.mosaicLevel,
-                          })
-                        }
-                      />
-                      <span>封面图马赛克</span>
-                    </label>
-
-                    <div className="export-option-slider">
-                      <div className="export-option-slider-header">
-                        <label htmlFor="export-mosaic-level">马赛克等级</label>
-                        <strong>{exportDialog.mosaicLevel}</strong>
-                      </div>
-                      <input
-                        id="export-mosaic-level"
-                        type="range"
-                        min="1"
-                        max="5"
-                        step="1"
-                        value={exportDialog.mosaicLevel}
-                        disabled={!exportDialog.coverMosaic}
-                        onChange={(event) =>
-                          void updateExportDialogCoverOptions({
-                            coverMosaic: true,
-                            mosaicLevel: Number(event.currentTarget.value),
-                          })
-                        }
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <p className="inline-hint">当前导出不包含封面图。</p>
-                )}
-              </div>
-
-              <div className="button-row export-dialog-actions">
-                <button
-                  className="text-button"
-                  type="button"
-                  onClick={() => void handleCopyExportImage()}
-                  disabled={
-                    exportDialog.isRefreshing ||
-                    !exportDialog.canRasterize ||
-                    (!desktopBridge && !canCopyImageToClipboard())
-                  }
-                >
-                  <ClipboardCopy aria-hidden="true" size={16} />
-                  {exportDialog.isRefreshing ? "更新中" : "复制图片"}
-                </button>
-                <button
-                  className="text-button primary"
-                  type="button"
-                  onClick={() => void handleSaveExportFile()}
-                  disabled={exportDialog.isRefreshing}
-                >
-                  <Download aria-hidden="true" size={16} />
-                  {exportDialog.isRefreshing ? "更新中" : "导出文件"}
-                </button>
-                <button
-                  className="text-button"
-                  type="button"
-                  onClick={closeExportDialog}
-                >
-                  <X aria-hidden="true" size={16} />
-                  取消
-                </button>
-              </div>
-            </div>
-          </div>
+          <ExportDialog
+            state={exportDialog}
+            exportDirectory={exportPreferences.directory}
+            hasDesktopBridge={desktopBridge !== null}
+            canCopy={
+              exportDialog.canRasterize &&
+              (desktopBridge !== null || canCopyImageToClipboard())
+            }
+            onChooseDirectory={handleChooseExportDirectory}
+            onUpdateCoverOptions={updateExportDialogCoverOptions}
+            onCopyImage={handleCopyExportImage}
+            onSaveFile={handleSaveExportFile}
+            onClose={closeExportDialog}
+          />
         ) : null}
 
         {isCompactLayout ? (
