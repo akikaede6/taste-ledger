@@ -1,6 +1,5 @@
 import { ImagePlus, Save, Star, X } from "lucide-react";
 import { type ChangeEvent, type FormEvent } from "react";
-import { getCategoryLineage } from "../../core/category-tree";
 import { createDisplayImageDataUrl } from "../../core/image-utils";
 import type { Category, Library as TasteLibrary } from "../../core/model";
 import type { WorkModalState } from "../../types/workspace";

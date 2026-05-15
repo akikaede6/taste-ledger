@@ -1,4 +1,4 @@
-import { ListPlus, Plus, Save, Trash2, X } from "lucide-react";
+import { ListPlus, Save, Trash2, X } from "lucide-react";
 import { type FormEvent } from "react";
 import type { Library as TasteLibrary } from "../../core/model";
 import type { CategoryModalState } from "../../types/workspace";

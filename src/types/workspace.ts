@@ -2,7 +2,7 @@ import type {
   RatingTemplateDraft,
   RatingDimensionDraft,
 } from "../components/rating/RatingDrafts";
-import type { RankingMode, TierLevel } from "../core/model";
+import type { TierLevel } from "../core/model";
 import type { ShareCoverOptions, ShareImageFile } from "../core/share-export";
 
 export interface TierListSaveInput {

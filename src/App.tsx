@@ -32,14 +32,19 @@ import {
   syncWorkModalCategory,
 } from "./components/work/WorkModalState";
 import {
+  countTierListWorks,
+  getRankingDimensionName,
+  getRankingDimensionValue,
+} from "./components/rankings/RankingHelpers";
+import { TierListEditor } from "./components/rankings/TierListEditor";
+import { RankingPreviewPanel } from "./components/rankings/RankingPreviewPanel";
+import {
   ArrowLeft,
-  BarChart3,
   BookOpen,
   ClipboardCopy,
   ChevronRight,
   Download,
   FileText,
-  FolderPlus,
   FolderOpen,
   Filter,
   ImagePlus,
@@ -49,62 +54,36 @@ import {
   Loader2,
   Menu,
   Pencil,
-  LayoutDashboard,
   Search,
-  Share2,
   RefreshCw,
   Save,
-  Plus,
   Star,
   Trash2,
   Trophy,
   Tag,
   X,
 } from "lucide-react";
-import {
-  type ChangeEvent,
-  type DragEvent,
-  type FormEvent,
-  type ReactElement,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { sortTierListsByRecentUpdate } from "./core/library-actions";
 import {
   getCategoryDescendantIds,
   getCategoryLineage,
   getCategoryRootId,
   getCategoryTree,
-  type CategoryTreeNode,
 } from "./core/category-tree";
 import { useLibraryState } from "./core/library-store";
-import type {
-  Category,
-  Library as TasteLibrary,
-  RankingMode,
-  RatingDimensionScore,
-  RatingDimensionTemplate,
-  TierLevel,
-  TierLevelId,
-  TierList,
-  Work,
-} from "./core/model";
+import type { RatingDimensionTemplate, TierLevelId, Work } from "./core/model";
 import {
   collectRankingDimensionOptions,
   sortWorksForRanking,
-  type RankingDimensionOption,
 } from "./core/ranking";
 import {
   convertSvgTextToExportFile,
   copyImageToClipboard,
-  createDisplayImageDataUrl,
   createSvgDataUrl,
 } from "./core/image-utils";
 import type { LibraryRepository } from "./core/repository";
 import { createLibraryRepository } from "./core/repository";
-import { calculateFinalScore } from "./core/scoring";
 import type { ShareImageFile, WorkShareVariant } from "./core/share-export";
 import {
   DEFAULT_SHARE_COVER_OPTIONS,
@@ -2015,484 +1994,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   );
 }
 
-interface RankingPreviewPanelProps {
-  rootCategory: Category | null;
-  library: TasteLibrary;
-  mode: ScoreRankingMode;
-  dimensionOptions: RankingDimensionOption[];
-  selectedDimensionId: string | null;
-  works: Work[];
-  coverImageUrls: Map<string, string>;
-  onOpenWork(workId: string): void;
-  onExport(): Promise<void> | void;
-  onModeChange(mode: ScoreRankingMode): void;
-  onDimensionChange(dimensionId: string): void;
-}
-
-function RankingPreviewPanel({
-  rootCategory,
-  library,
-  mode,
-  dimensionOptions,
-  selectedDimensionId,
-  works,
-  coverImageUrls,
-  onOpenWork,
-  onExport,
-  onModeChange,
-  onDimensionChange,
-}: RankingPreviewPanelProps) {
-  const [isExporting, setIsExporting] = useState(false);
-  const canExport =
-    rootCategory !== null &&
-    works.length > 0 &&
-    (mode !== "dimension" || selectedDimensionId !== null);
-
-  async function handleExport() {
-    if (!canExport) {
-      return;
-    }
-
-    setIsExporting(true);
-    try {
-      await onExport();
-    } finally {
-      setIsExporting(false);
-    }
-  }
-
-  if (!rootCategory) {
-    return <p className="muted">先创建一个大分类，再查看排名。</p>;
-  }
-
-  return (
-    <div className="ranking-preview">
-      <div className="score-ranking-header">
-        <div>
-          <h3>数值排行榜</h3>
-          <p>
-            {mode === "dimension" && selectedDimensionId
-              ? getRankingDimensionName(selectedDimensionId, dimensionOptions)
-              : "综合评分"}
-          </p>
-        </div>
-        <button
-          className="text-button"
-          type="button"
-          onClick={() => void handleExport()}
-          disabled={isExporting || !canExport}
-        >
-          <ImagePlus aria-hidden="true" size={16} />
-          {isExporting ? "导出中" : "导出排名图"}
-        </button>
-      </div>
-
-      <section
-        className="ranking-toolbar ranking-toolbar-inline"
-        aria-label="分值排名筛选"
-      >
-        <div className="toolbar-field">
-          <span>排序维度</span>
-          <select
-            aria-label="排序维度类型"
-            value={mode}
-            onChange={(event) => {
-              const nextMode = event.currentTarget.value as ScoreRankingMode;
-              onModeChange(nextMode);
-            }}
-          >
-            <option value="finalScore">综合评分</option>
-            <option value="dimension">单个评分维度</option>
-          </select>
-        </div>
-
-        <div className="toolbar-field">
-          <span>评分维度</span>
-          <select
-            aria-label="评分维度"
-            value={selectedDimensionId ?? ""}
-            onChange={(event) => onDimensionChange(event.currentTarget.value)}
-            disabled={mode !== "dimension" || dimensionOptions.length === 0}
-          >
-            {dimensionOptions.length > 0 ? (
-              dimensionOptions.map((dimension) => (
-                <option key={dimension.id} value={dimension.id}>
-                  {dimension.name}
-                </option>
-              ))
-            ) : (
-              <option value="">暂无可用评分维度</option>
-            )}
-          </select>
-        </div>
-      </section>
-
-      {mode === "dimension" && dimensionOptions.length === 0 ? (
-        <p className="inline-hint">先添加评分维度，再按单个维度排名。</p>
-      ) : null}
-
-      {works.length > 0 ? (
-        <ol className="ranking-work-list" aria-label="排名作品">
-          {works.map((work, index) => {
-            const coverImageUrl = coverImageUrls.get(work.id) ?? null;
-            const categoryPath = getCategoryLineage(library, work.categoryId)
-              .map((category) => category.name)
-              .join(" / ");
-
-            return (
-              <li className="ranking-work-row" key={work.id}>
-                <span className="rank-number">
-                  #{String(index + 1).padStart(2, "0")}
-                </span>
-                <span className="ranking-work-cover">
-                  {coverImageUrl ? (
-                    <img src={coverImageUrl} alt="" />
-                  ) : (
-                    <ImagePlus aria-hidden="true" size={18} />
-                  )}
-                </span>
-                <div className="ranking-work-copy">
-                  <strong>{work.title}</strong>
-                  <small>{categoryPath || rootCategory.name}</small>
-                </div>
-                <strong className="ranking-work-score">
-                  {formatRankingPreviewScore(work, mode, selectedDimensionId)}
-                </strong>
-                <button
-                  className="icon-button"
-                  type="button"
-                  aria-label={`打开 ${work.title}`}
-                  onClick={() => onOpenWork(work.id)}
-                >
-                  <ChevronRight aria-hidden="true" size={16} />
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-      ) : (
-        <p className="muted">这个大分类还没有作品。</p>
-      )}
-    </div>
-  );
-}
-
-interface TierListEditorProps {
-  tierList: TierList;
-  works: Work[];
-  coverImageUrls: Map<string, string>;
-  onSave(input: TierListSaveInput): Promise<void>;
-  onDelete(): Promise<void>;
-  onMoveWork(workId: string, levelId: TierLevelId): Promise<void>;
-  onRemoveWork(workId: string): Promise<void>;
-  onExport(input: TierListSaveInput): Promise<void>;
-}
-
-function TierListEditor({
-  tierList,
-  works,
-  coverImageUrls,
-  onSave,
-  onDelete,
-  onMoveWork,
-  onRemoveWork,
-  onExport,
-}: TierListEditorProps) {
-  const [name, setName] = useState(tierList.name);
-  const [levelDrafts, setLevelDrafts] = useState<TierLevel[]>(() =>
-    tierList.levels.map((level) => ({
-      ...level,
-      workIds: [...level.workIds],
-    })),
-  );
-  const [draftError, setDraftError] = useState<string | null>(null);
-  const [isExporting, setIsExporting] = useState(false);
-  const [draggedWorkId, setDraggedWorkId] = useState<string | null>(null);
-  const workById = useMemo(
-    () => new Map(works.map((work) => [work.id, work] as const)),
-    [works],
-  );
-  const assignedWorkIds = useMemo(
-    () => new Set(tierList.levels.flatMap((level) => level.workIds)),
-    [tierList.levels],
-  );
-  const unassignedWorks = works.filter((work) => !assignedWorkIds.has(work.id));
-  const hasAssignedWorks = tierList.levels.some(
-    (level) => level.workIds.length > 0,
-  );
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (name.trim().length === 0) {
-      setDraftError("分级名称不能为空。");
-      return;
-    }
-
-    setDraftError(null);
-    await onSave({ name, levels: levelDrafts });
-  }
-
-  function updateLevelName(levelId: TierLevelId, nextName: string) {
-    setDraftError(null);
-    setLevelDrafts((current) =>
-      current.map((level) =>
-        level.id === levelId ? { ...level, name: nextName } : level,
-      ),
-    );
-  }
-
-  async function handleExport() {
-    if (!hasAssignedWorks) {
-      return;
-    }
-
-    if (name.trim().length === 0) {
-      setDraftError("分级名称不能为空。");
-      return;
-    }
-
-    setDraftError(null);
-    setIsExporting(true);
-    try {
-      await onExport({ name, levels: levelDrafts });
-    } finally {
-      setIsExporting(false);
-    }
-  }
-
-  function getDraggedWorkId(event: DragEvent<HTMLElement>): string | null {
-    return (
-      draggedWorkId ||
-      event.dataTransfer.getData("text/plain") ||
-      event.dataTransfer.getData("text") ||
-      null
-    );
-  }
-
-  function handleDragStart(workId: string, event: DragEvent<HTMLElement>) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", workId);
-    event.dataTransfer.setData("text", workId);
-    setDraggedWorkId(workId);
-  }
-
-  function handleDragEnd() {
-    setDraggedWorkId(null);
-  }
-
-  function handleDropToLevel(
-    levelId: TierLevelId,
-    event: DragEvent<HTMLElement>,
-  ) {
-    event.preventDefault();
-    const workId = getDraggedWorkId(event);
-
-    setDraggedWorkId(null);
-
-    if (!workId) {
-      return;
-    }
-
-    void onMoveWork(workId, levelId);
-  }
-
-  function handleDropToUnassigned(event: DragEvent<HTMLElement>) {
-    event.preventDefault();
-    const workId = getDraggedWorkId(event);
-
-    setDraggedWorkId(null);
-
-    if (!workId) {
-      return;
-    }
-
-    void onRemoveWork(workId);
-  }
-
-  return (
-    <div className="tier-editor">
-      <form
-        className="tier-editor-form"
-        noValidate
-        onSubmit={(event) => void handleSubmit(event)}
-      >
-        <label htmlFor={`tier-list-name-${tierList.id}`}>分级名称</label>
-        <input
-          id={`tier-list-name-${tierList.id}`}
-          value={name}
-          onChange={(event) => setName(event.currentTarget.value)}
-        />
-
-        <div className="button-row">
-          <button className="text-button primary" type="submit">
-            <Save aria-hidden="true" size={16} />
-            保存分级
-          </button>
-          <button
-            className="text-button danger"
-            type="button"
-            onClick={() => void onDelete()}
-          >
-            <Trash2 aria-hidden="true" size={16} />
-            删除分级
-          </button>
-          <button
-            className="text-button"
-            type="button"
-            onClick={() => void handleExport()}
-            disabled={isExporting || !hasAssignedWorks}
-          >
-            <ImagePlus aria-hidden="true" size={16} />
-            {isExporting ? "导出中" : "导出分级图"}
-          </button>
-        </div>
-
-        <div className="tier-level-editor">
-          <div className="tier-section-heading">
-            <h4>等级名称</h4>
-            <small>可直接修改导出显示</small>
-          </div>
-          <div className="tier-level-name-grid">
-            {levelDrafts.map((level, index) => (
-              <div className="tier-level-name-field" key={level.id}>
-                <label htmlFor={`tier-level-name-${tierList.id}-${level.id}`}>
-                  等级 {index + 1}
-                </label>
-                <input
-                  id={`tier-level-name-${tierList.id}-${level.id}`}
-                  value={level.name}
-                  onChange={(event) =>
-                    updateLevelName(level.id, event.currentTarget.value)
-                  }
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {!hasAssignedWorks ? (
-          <p className="inline-hint">至少放入一个作品后再导出分级图。</p>
-        ) : null}
-
-        {draftError ? (
-          <p className="inline-error" role="alert">
-            {draftError}
-          </p>
-        ) : null}
-      </form>
-
-      <div
-        className="tier-unassigned tier-dropzone"
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => handleDropToUnassigned(event)}
-      >
-        <div className="tier-section-heading">
-          <h4>未分级作品</h4>
-          <small>{unassignedWorks.length}</small>
-        </div>
-        {works.length === 0 ? (
-          <p className="muted">这个分类还没有作品。</p>
-        ) : unassignedWorks.length > 0 ? (
-          <div className="tier-card-grid" aria-label="未分级作品">
-            {unassignedWorks.map((work) => (
-              <TierWorkCard
-                key={work.id}
-                work={work}
-                coverImageUrl={coverImageUrls.get(work.id) ?? null}
-                isDragging={draggedWorkId === work.id}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-              />
-            ))}
-          </div>
-        ) : (
-          <p className="muted">所有作品都已经放入分级。</p>
-        )}
-      </div>
-
-      <div className="tier-board" aria-label="五级分级">
-        {levelDrafts.map((level) => {
-          const levelWorks = level.workIds.flatMap((workId) => {
-            const work = workById.get(workId);
-            return work ? [work] : [];
-          });
-
-          return (
-            <section
-              className="tier-row tier-dropzone"
-              key={level.id}
-              role="region"
-              aria-label={`等级 ${level.name}`}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => handleDropToLevel(level.id, event)}
-            >
-              <div className={`tier-level-label ${level.id}`}>
-                <strong>{level.name}</strong>
-                <small>{levelWorks.length}</small>
-              </div>
-              {levelWorks.length > 0 ? (
-                <div className="tier-card-grid">
-                  {levelWorks.map((work) => (
-                    <TierWorkCard
-                      key={work.id}
-                      work={work}
-                      coverImageUrl={coverImageUrls.get(work.id) ?? null}
-                      isDragging={draggedWorkId === work.id}
-                      onDragStart={handleDragStart}
-                      onDragEnd={handleDragEnd}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <p className="muted">暂无作品</p>
-              )}
-            </section>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-interface TierWorkCardProps {
-  work: Work;
-  coverImageUrl: string | null;
-  isDragging: boolean;
-  onDragStart(workId: string, event: DragEvent<HTMLElement>): void;
-  onDragEnd(): void;
-}
-
-function TierWorkCard({
-  work,
-  coverImageUrl,
-  isDragging,
-  onDragStart,
-  onDragEnd,
-}: TierWorkCardProps) {
-  return (
-    <article
-      className={isDragging ? "tier-work-card dragging" : "tier-work-card"}
-      draggable
-      aria-label={`拖动 ${work.title}`}
-      aria-grabbed={isDragging}
-      onDragStart={(event) => onDragStart(work.id, event)}
-      onDragEnd={onDragEnd}
-    >
-      <div className="tier-work-cover">
-        {coverImageUrl ? (
-          <img src={coverImageUrl} alt="" />
-        ) : (
-          <span>{work.coverImagePath ?? "未设置封面"}</span>
-        )}
-      </div>
-      <div className="tier-work-copy">
-        <strong>{work.title}</strong>
-      </div>
-    </article>
-  );
-}
-
 function createEmptyCategoryModalState(): CategoryModalState {
   return createRootCategoryModalState();
 }
@@ -2526,47 +2027,6 @@ function createChildCategoryModalState(
     name: "",
     dimensionDrafts: [],
   };
-}
-
-function getRankingDimensionValue(
-  dimensionId: string,
-  options: RankingDimensionOption[],
-): string {
-  return options.some((option) => option.id === dimensionId)
-    ? dimensionId
-    : (options[0]?.id ?? "");
-}
-
-function getRankingDimensionName(
-  dimensionId: string,
-  options: RankingDimensionOption[],
-): string {
-  return (
-    options.find((option) => option.id === dimensionId)?.name ??
-    `维度 ${dimensionId}`
-  );
-}
-
-function formatRankingPreviewScore(
-  work: Work,
-  mode: ScoreRankingMode,
-  dimensionId: string | null,
-): string {
-  if (mode === "dimension" && dimensionId) {
-    const dimension = work.ratingDimensions.find(
-      (item) => item.id === dimensionId,
-    );
-    return dimension ? `${dimension.score} 分` : "未评分";
-  }
-
-  return work.finalScore === null ? "未评分" : `${work.finalScore} 分`;
-}
-
-function countTierListWorks(tierList: TierList): number {
-  return tierList.levels.reduce(
-    (count, level) => count + level.workIds.length,
-    0,
-  );
 }
 
 interface TagOption {
