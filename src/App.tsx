@@ -10,7 +10,7 @@ import {
   readTemplateDrafts,
   type RatingDimensionDraft,
   type RatingTemplateDraft,
-} from "./components/rating/ratingDrafts";
+} from "./components/rating/RatingDrafts";
 import { CategoryDimensionEditor } from "./components/category/CategoryDimensionEditor";
 import {
   ArrowLeft,

@@ -23,7 +23,9 @@ export function CategoryChildNode({
 
   return (
     <button
-      className={selected ? "category-child-button selected" : "category-child-button"}
+      className={
+        selected ? "category-child-button selected" : "category-child-button"
+      }
       type="button"
       onClick={() => onSelectCategory(node.category.id)}
     >

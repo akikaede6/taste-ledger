@@ -13,7 +13,11 @@ export function ViewNavigation({
   return (
     <nav className="view-nav" aria-label="主导航">
       <button
-        className={activeView === "dashboard" ? "workspace-nav-button  selected" : "workspace-nav-button "}
+        className={
+          activeView === "dashboard"
+            ? "workspace-nav-button  selected"
+            : "workspace-nav-button "
+        }
         type="button"
         onClick={() => onSelectView("dashboard")}
       >
@@ -22,7 +26,11 @@ export function ViewNavigation({
       </button>
 
       <button
-        className={activeView === "rankings" ? "workspace-nav-button selected" : "workspace-nav-button"}
+        className={
+          activeView === "rankings"
+            ? "workspace-nav-button selected"
+            : "workspace-nav-button"
+        }
         type="button"
         onClick={() => onSelectView("rankings")}
       >
@@ -31,7 +39,11 @@ export function ViewNavigation({
       </button>
 
       <button
-        className={activeView === "sharing" ? "workspace-nav-button selected" : "workspace-nav-button"}
+        className={
+          activeView === "sharing"
+            ? "workspace-nav-button selected"
+            : "workspace-nav-button"
+        }
         type="button"
         onClick={() => onSelectView("sharing")}
       >

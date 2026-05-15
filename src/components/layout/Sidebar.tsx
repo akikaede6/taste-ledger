@@ -75,12 +75,20 @@ export function Sidebar({
       <ViewNavigation activeView={activeView} onSelectView={onSelectView} />
 
       <div className="sidebar-actions">
-        <button className="sidebar-secondary-action" type="button" onClick={onCreateWork}>
+        <button
+          className="sidebar-secondary-action"
+          type="button"
+          onClick={onCreateWork}
+        >
           <Plus aria-hidden="true" size={16} />
           添加作品
         </button>
 
-        <button className="sidebar-secondary-action" type="button" onClick={onCreateRootCategory}>
+        <button
+          className="sidebar-secondary-action"
+          type="button"
+          onClick={onCreateRootCategory}
+        >
           <Plus aria-hidden="true" size={16} />
           创建新大类
         </button>

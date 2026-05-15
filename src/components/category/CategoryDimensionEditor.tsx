@@ -77,7 +77,11 @@ export function CategoryDimensionEditor({
       <div className="section-heading">
         <span>评分维度</span>
 
-        <button className="text-button" type="button" onClick={addTemplateDraft}>
+        <button
+          className="text-button"
+          type="button"
+          onClick={addTemplateDraft}
+        >
           <Plus aria-hidden="true" size={16} />
           添加维度
         </button>
