@@ -1,3 +1,6 @@
+import type { WorkspaceView } from "./types/ui";
+import { MobileBottomNavigation } from "./components/layout/MobileBottomNavigation";
+import { Sidebar } from "./components/layout/Sidebar";
 import {
   ArrowLeft,
   BarChart3,
@@ -108,7 +111,6 @@ interface ExportShareBuilder {
 }
 
 type ScoreRankingMode = Exclude<RankingMode, "manual">;
-type WorkspaceView = "dashboard" | "work" | "rankings" | "sharing";
 type ActiveModal = "category" | "work" | null;
 type RankingSurfaceMode = "tier" | "score";
 
@@ -1056,91 +1058,6 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
     setExportDialog(null);
   }
 
-  function renderCategoryNodes(nodes: CategoryTreeNode[]): ReactElement[] {
-    return nodes.map((node) => {
-      const rootScopeIds = new Set(
-        getCategoryDescendantIds(state.library, node.category.id),
-      );
-      const workCount = state.library.works.filter((work) =>
-        rootScopeIds.has(work.categoryId),
-      ).length;
-      const childCount = node.children.length;
-      const selectedRoot = state.selectedCategoryId === node.category.id;
-      const selectedChild = node.children.some(
-        (child) => child.category.id === state.selectedCategoryId,
-      );
-
-      return (
-        <div className="category-group" key={node.category.id}>
-          <div
-            className={
-              selectedRoot || selectedChild
-                ? "category-root-row selected"
-                : "category-root-row"
-            }
-          >
-            <button
-              className="category-root-button"
-              type="button"
-              onClick={() => handleSelectCategory(node.category.id)}
-            >
-              <div className="category-button-row">
-                <FolderOpen aria-hidden="true" size={16} />
-                <span>{node.category.name}</span>
-              </div>
-              <small>
-                {workCount} 作品
-                {childCount > 0 ? ` · ${childCount} 子分类` : ""}
-              </small>
-            </button>
-            <button
-              className="category-add-child-button"
-              type="button"
-              aria-label={`在 ${node.category.name} 下创建子分类`}
-              title="创建子分类"
-              onClick={(event) => {
-                event.stopPropagation();
-                openChildCategoryModal(node.category.id);
-              }}
-            >
-              <FolderPlus aria-hidden="true" size={15} />
-            </button>
-          </div>
-          {node.children.length > 0 ? (
-            <div className="category-child-list">
-              {node.children.map((child) => {
-                const childWorkCount = state.library.works.filter(
-                  (work) => work.categoryId === child.category.id,
-                ).length;
-                const selected = state.selectedCategoryId === child.category.id;
-
-                return (
-                  <div className="category-child-group" key={child.category.id}>
-                    <button
-                      className={
-                        selected
-                          ? "category-child-button selected"
-                          : "category-child-button"
-                      }
-                      type="button"
-                      onClick={() => handleSelectCategory(child.category.id)}
-                    >
-                      <div className="category-button-row">
-                        <FolderPlus aria-hidden="true" size={15} />
-                        <span>{child.category.name}</span>
-                      </div>
-                      <small>{childWorkCount} 作品 · 共用上级设置</small>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-      );
-    });
-  }
-
   return (
     <main className="app-shell">
       {isCompactLayout && isMobileSidebarOpen ? (
@@ -1152,117 +1069,23 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         />
       ) : null}
 
-      <aside
-        className={
-          isCompactLayout && isMobileSidebarOpen
-            ? "sidebar mobile-open"
-            : "sidebar"
-        }
-        aria-label="分类"
-      >
-        <div className="brand-row">
-          <Library aria-hidden="true" size={24} />
-          <div>
-            <p className="eyebrow">Taste Ledger</p>
-            <h1>Taste Ledger</h1>
-          </div>
-          {isCompactLayout ? (
-            <button
-              className="mobile-sidebar-close"
-              type="button"
-              aria-label="关闭分类栏"
-              onClick={closeMobileSidebar}
-            >
-              <X aria-hidden="true" size={18} />
-            </button>
-          ) : null}
-        </div>
-
-        {desktopBridge ? (
-          <section className="sidebar-card" aria-label="数据文件夹">
-            <div className="sidebar-card-heading">
-              <FolderOpen aria-hidden="true" size={16} />
-              <h3>数据文件夹</h3>
-            </div>
-            <p className="storage-directory-path">
-              {storageDirectory ?? "正在读取"}
-            </p>
-            <button
-              className="text-button"
-              type="button"
-              onClick={() => void handleChooseStorageDirectory()}
-            >
-              <FolderOpen aria-hidden="true" size={16} />
-              选择数据文件夹
-            </button>
-          </section>
-        ) : null}
-
-        <nav className="workspace-nav" aria-label="主视图">
-          <button
-            className={
-              dashboardView
-                ? "workspace-nav-button selected"
-                : "workspace-nav-button"
-            }
-            type="button"
-            onClick={() => handleSelectView("dashboard")}
-          >
-            <LayoutDashboard aria-hidden="true" size={16} />
-            仪表盘
-          </button>
-          <button
-            className={
-              rankingsView
-                ? "workspace-nav-button selected"
-                : "workspace-nav-button"
-            }
-            type="button"
-            onClick={() => handleSelectView("rankings")}
-          >
-            <BarChart3 aria-hidden="true" size={16} />
-            排行榜
-          </button>
-          <button
-            className={
-              sharingView
-                ? "workspace-nav-button selected"
-                : "workspace-nav-button"
-            }
-            type="button"
-            onClick={() => handleSelectView("sharing")}
-          >
-            <Share2 aria-hidden="true" size={16} />
-            导出预览
-          </button>
-        </nav>
-
-        <div className="sidebar-actions">
-          <button
-            className="sidebar-primary-action"
-            type="button"
-            onClick={openCreateWorkModal}
-            disabled={rootCategories.length === 0}
-          >
-            <ListPlus aria-hidden="true" size={16} />
-            添加作品
-          </button>
-          <button
-            className="sidebar-secondary-action"
-            type="button"
-            aria-label="创建大分类"
-            onClick={openRootCategoryModal}
-          >
-            <FolderPlus aria-hidden="true" size={16} />
-            创建新大类
-          </button>
-        </div>
-
-        <nav className="category-list" aria-label="分类列表">
-          <p className="sidebar-section-title">媒体库分类</p>
-          {renderCategoryNodes(categoryTree)}
-        </nav>
-      </aside>
+      <Sidebar
+        isCompactLayout={isCompactLayout}
+        isMobileOpen={isMobileSidebarOpen}
+        activeView={activeView}
+        categoryTree={categoryTree}
+        library={state.library}
+        selectedCategoryId={state.selectedCategoryId}
+        storageDirectory={storageDirectory}
+        showStorageDirectoryPanel={desktopBridge !== null}
+        onSelectView={handleSelectView}
+        onCreateWork={openCreateWorkModal}
+        onCreateRootCategory={openRootCategoryModal}
+        onCreateChildCategory={openChildCategoryModal}
+        onSelectCategory={handleSelectCategory}
+        onChooseStorageDirectory={handleChooseStorageDirectory}
+        onCloseMobileSidebar={closeMobileSidebar}
+      />
 
       <section className="workspace">
         <header className="workspace-header">
@@ -2201,59 +2024,11 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
         ) : null}
 
         {isCompactLayout ? (
-          <nav className="mobile-bottom-nav" aria-label="移动端导航">
-            <button
-              className={
-                dashboardView ? "mobile-nav-item selected" : "mobile-nav-item"
-              }
-              type="button"
-              aria-pressed={dashboardView}
-              onClick={() => handleSelectView("dashboard")}
-            >
-              <LayoutDashboard aria-hidden="true" size={20} />
-              <span>仪表盘</span>
-            </button>
-            <button
-              className={
-                rankingsView ? "mobile-nav-item selected" : "mobile-nav-item"
-              }
-              type="button"
-              aria-pressed={rankingsView}
-              onClick={() => handleSelectView("rankings")}
-            >
-              <BarChart3 aria-hidden="true" size={20} />
-              <span>排行榜</span>
-            </button>
-            <button
-              className="mobile-nav-action"
-              type="button"
-              aria-label="添加作品"
-              onClick={openCreateWorkModal}
-              disabled={rootCategories.length === 0}
-            >
-              <Plus aria-hidden="true" size={24} />
-            </button>
-            <button
-              className={
-                sharingView ? "mobile-nav-item selected" : "mobile-nav-item"
-              }
-              type="button"
-              aria-pressed={sharingView}
-              onClick={() => handleSelectView("sharing")}
-            >
-              <Share2 aria-hidden="true" size={20} />
-              <span>分享</span>
-            </button>
-            <button
-              className="mobile-nav-item"
-              type="button"
-              aria-label="打开分类栏"
-              onClick={toggleMobileSidebar}
-            >
-              <Menu aria-hidden="true" size={20} />
-              <span>分类</span>
-            </button>
-          </nav>
+          <MobileBottomNavigation
+            activeView={activeView}
+            onSelectView={handleSelectView}
+            onOpenSidebar={toggleMobileSidebar}
+          />
         ) : null}
       </section>
     </main>
