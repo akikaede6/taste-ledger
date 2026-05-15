@@ -6,7 +6,7 @@ import {
   createTemplateDrafts,
   readTemplateDrafts,
   type RatingTemplateDraft,
-} from "../rating/ratingDrafts";
+} from "../rating/RatingDrafts";
 
 type CategoryDimensionEditorProps = {
   category: Category;
