@@ -64,6 +64,7 @@ import { WorkspaceHeader } from "./components/workspace/WorkspaceHeader";
 import { DashboardView } from "./components/dashboard/DashboardView";
 import { WorkDetailView } from "./components/work/WorkDetailView";
 import { SharingView } from "./components/sharing/SharingView";
+import { RankingsView } from "./components/rankings/RankingsView";
 import {
   BookOpen,
   FileText,
@@ -1127,166 +1128,38 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
             onBackToDashboard={() => handleSelectView("dashboard")}
           />
         ) : rankingsView ? (
-          <div className="ranking-hall">
-            <section className="ranking-hero-panel">
-              <div>
-                <p className="eyebrow">排行榜</p>
-                <h3>荣誉殿堂</h3>
-                <p>
-                  {selectedRootCategory
-                    ? `${selectedRootCategory.name} 下共有 ${sharedCategoryWorks.length} 个作品。`
-                    : "先创建一个大分类，再生成分值排名或五级分级。"}
-                </p>
-              </div>
-              <div className="segmented-control" aria-label="排行榜视图">
-                <button
-                  className={
-                    rankingSurfaceMode === "tier" ? "selected" : undefined
-                  }
-                  type="button"
-                  aria-pressed={rankingSurfaceMode === "tier"}
-                  onClick={() => setRankingSurfaceMode("tier")}
-                >
-                  Tier List
-                </button>
-                <button
-                  className={
-                    rankingSurfaceMode === "score" ? "selected" : undefined
-                  }
-                  type="button"
-                  aria-pressed={rankingSurfaceMode === "score"}
-                  onClick={() => setRankingSurfaceMode("score")}
-                >
-                  分值排名
-                </button>
-              </div>
-            </section>
-
-            <section className="ranking-toolbar" aria-label="排行榜筛选">
-              <div className="toolbar-field">
-                <span>分类</span>
-                <select
-                  aria-label="排行榜分类"
-                  value={selectedRootCategory?.id ?? ""}
-                  onChange={(event) => handleSelectCategory(event.target.value)}
-                  disabled={rootCategories.length === 0}
-                >
-                  {rootCategories.length > 0 ? (
-                    rootCategories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">暂无分类</option>
-                  )}
-                </select>
-              </div>
-            </section>
-
-            {rankingSurfaceMode === "tier" ? (
-              <>
-                <section className="tier-control-panel">
-                  {selectedCategory ? (
-                    <>
-                      <form
-                        className="tier-create-toolbar"
-                        onSubmit={handleCreateTierList}
-                      >
-                        <label htmlFor="new-tier-list">新分级</label>
-                        <input
-                          id="new-tier-list"
-                          value={newTierListName}
-                          onChange={(event) =>
-                            setNewTierListName(event.target.value)
-                          }
-                          placeholder="五级分级"
-                        />
-                        <button className="text-button primary" type="submit">
-                          <ListPlus aria-hidden="true" size={16} />
-                          创建分级
-                        </button>
-                      </form>
-
-                      <div className="tier-list" aria-label="分级列表">
-                        {categoryTierLists.length > 0 ? (
-                          categoryTierLists.map((tierList) => {
-                            const selected =
-                              tierList.id === state.selectedTierListId;
-                            const assignedCount = countTierListWorks(tierList);
-
-                            return (
-                              <button
-                                key={tierList.id}
-                                className={
-                                  selected
-                                    ? "tier-list-button selected"
-                                    : "tier-list-button"
-                                }
-                                type="button"
-                                onClick={() =>
-                                  controller.selectTierList(tierList.id)
-                                }
-                              >
-                                <span>{tierList.name}</span>
-                                <small>{assignedCount} 作品</small>
-                              </button>
-                            );
-                          })
-                        ) : (
-                          <p className="muted">这个分类还没有五级分级。</p>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <p className="muted">先创建一个分类，再创建分级。</p>
-                  )}
-                </section>
-
-                <section className="panel tier-board-panel">
-                  {selectedTierList ? (
-                    <TierListEditor
-                      key={`${selectedTierList.id}-${selectedTierList.updatedAt}`}
-                      tierList={selectedTierList}
-                      works={sharedCategoryWorks}
-                      coverImageUrls={sharedCoverImageUrls}
-                      onSave={handleSaveTierList}
-                      onDelete={handleDeleteTierList}
-                      onMoveWork={handleMoveTierListWork}
-                      onRemoveWork={handleRemoveTierListWork}
-                      onExport={handleExportTierListShare}
-                    />
-                  ) : (
-                    <div className="center-state">
-                      <Layers aria-hidden="true" size={28} />
-                      <p>创建一个五级分级后，可以把作品放进 S 到 D。</p>
-                    </div>
-                  )}
-                </section>
-              </>
-            ) : (
-              <section className="panel score-ranking-panel">
-                <RankingPreviewPanel
-                  rootCategory={selectedRootCategory}
-                  library={state.library}
-                  mode={rankingPreviewMode}
-                  dimensionOptions={rankingDimensionOptions}
-                  selectedDimensionId={selectedRankingPreviewDimensionId}
-                  works={rankingPreviewWorks}
-                  coverImageUrls={sharedCoverImageUrls}
-                  onOpenWork={handleOpenWorkDetail}
-                  onExport={handleExportRankingPreview}
-                  onModeChange={(mode) => {
-                    setRankingPreviewMode(mode);
-                    if (mode !== "dimension") {
-                      setRankingPreviewDimensionId("");
-                    }
-                  }}
-                  onDimensionChange={setRankingPreviewDimensionId}
-                />
-              </section>
-            )}
-          </div>
+          <RankingsView
+            library={state.library}
+            selectedCategory={selectedCategory}
+            selectedRootCategory={selectedRootCategory}
+            selectedTierList={selectedTierList}
+            selectedTierListId={state.selectedTierListId}
+            categoryTierLists={categoryTierLists}
+            sharedCategoryWorks={sharedCategoryWorks}
+            rankingPreviewWorks={rankingPreviewWorks}
+            sharedCoverImageUrls={sharedCoverImageUrls}
+            rankingSurfaceMode={rankingSurfaceMode}
+            rankingPreviewMode={rankingPreviewMode}
+            rankingPreviewDimensionId={rankingPreviewDimensionId}
+            selectedRankingPreviewDimensionId={
+              selectedRankingPreviewDimensionId
+            }
+            rankingDimensionOptions={rankingDimensionOptions}
+            newTierListName={newTierListName}
+            onRankingSurfaceModeChange={setRankingSurfaceMode}
+            onRankingPreviewModeChange={setRankingPreviewMode}
+            onRankingPreviewDimensionChange={setRankingPreviewDimensionId}
+            onNewTierListNameChange={setNewTierListName}
+            onCreateTierList={handleCreateTierList}
+            onSelectTierList={controller.selectTierList}
+            onSaveTierList={handleSaveTierList}
+            onDeleteTierList={handleDeleteTierList}
+            onMoveTierListWork={handleMoveTierListWork}
+            onRemoveTierListWork={handleRemoveTierListWork}
+            onOpenWorkDetail={handleOpenWorkDetail}
+            onExportRankingPreview={handleExportRankingPreview}
+            onExportTierList={handleExportTierListShare}
+          />
         ) : sharingView ? (
           <SharingView
             selectedWork={selectedWork}
