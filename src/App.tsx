@@ -39,6 +39,28 @@ import {
 import { TierListEditor } from "./components/rankings/TierListEditor";
 import { RankingPreviewPanel } from "./components/rankings/RankingPreviewPanel";
 import { ExportDialog } from "./components/export/ExportDialog";
+import { FatalState } from "./components/app/FatalState";
+import { LoadingShell } from "./components/app/LoadingShell";
+import {
+  createChildCategoryModalState,
+  createEmptyCategoryModalState,
+  createRootCategoryModalState,
+} from "./components/category/CategoryModalState";
+import {
+  collectTagOptions,
+  matchesTagFilters,
+  matchesWorkSearch,
+  parseTagText,
+} from "./components/tags/TagUtils";
+import {
+  canCopyImageToClipboard,
+  canRasterizeSvgForExport,
+  downloadFile,
+  loadExportPreferences,
+  sanitizeExportFileStem,
+  storeExportPreferences,
+} from "./components/export/ExportUtils";
+import { WorkspaceHeader } from "./components/workspace/WorkspaceHeader";
 import {
   ArrowLeft,
   BookOpen,
@@ -94,8 +116,6 @@ import {
 } from "./core/share-export";
 import { createRuntimeBackend } from "./platform/runtime-backend";
 import { getDesktopBridge } from "./platform/runtime-bridge";
-
-const EXPORT_DIRECTORY_KEY = "taste-ledger:export-directory";
 
 export function App() {
   const [repository, setRepository] = useState<LibraryRepository | null>(null);
@@ -1048,83 +1068,34 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
       />
 
       <section className="workspace">
-        <header className="workspace-header">
-          <div className="workspace-header-title">
-            {isCompactLayout ? (
-              <button
-                className="mobile-menu-trigger"
-                type="button"
-                aria-label="打开分类栏"
-                onClick={toggleMobileSidebar}
-              >
-                <Menu aria-hidden="true" size={20} />
-              </button>
-            ) : null}
-            <div className="workspace-header-copy">
-              <p className="eyebrow">{activeViewTitle}</p>
-              <h2>
-                {dashboardView
-                  ? (selectedCategory?.name ?? "创建第一个分类")
-                  : workDetailView
-                    ? (selectedWork?.title ?? "作品详情")
-                    : activeViewTitle}
-              </h2>
-              <p className="workspace-subtitle">{activeViewSubtitle}</p>
-              {dashboardView && selectedCategory ? (
-                <p className="workspace-path">{selectedCategoryPath}</p>
-              ) : null}
-              {workDetailView && selectedWorkCategoryPath ? (
-                <p className="workspace-path">{selectedWorkCategoryPath}</p>
-              ) : null}
-              {dashboardView &&
-              selectedRootCategory &&
-              selectedCategory &&
-              selectedRootCategory.id !== selectedCategory.id ? (
-                <p className="workspace-note">
-                  评分维度和排行由「{selectedRootCategory.name}」共享。
-                </p>
-              ) : null}
-              {(rankingsView || sharingView) && selectedRootCategory ? (
-                <p className="workspace-path">
-                  当前大分类：{selectedRootCategory.name}
-                </p>
-              ) : null}
-            </div>
-          </div>
-          <div className="workspace-header-actions">
-            {dashboardView ? (
-              <div className="workspace-search">
-                <Search aria-hidden="true" size={16} />
-                <input
-                  aria-label="搜索作品、标签或评价"
-                  value={searchQuery}
-                  onChange={(event) =>
-                    setSearchQuery(event.currentTarget.value)
-                  }
-                  placeholder="搜索作品、标签或短评"
-                />
-              </div>
-            ) : null}
-            {workDetailView ? (
-              <button
-                className="text-button"
-                type="button"
-                onClick={() => handleSelectView("dashboard")}
-              >
-                <ArrowLeft aria-hidden="true" size={16} />
-                返回仪表盘
-              </button>
-            ) : null}
-            <button
-              className="text-button"
-              type="button"
-              onClick={() => void controller.refresh()}
-            >
-              <RefreshCw aria-hidden="true" size={16} />
-              重新载入
-            </button>
-          </div>
-        </header>
+        <WorkspaceHeader
+          title={activeViewTitle}
+          subtitle={activeViewSubtitle}
+          heading={
+            dashboardView
+              ? (selectedCategory?.name ?? "创建第一个分类")
+              : workDetailView
+                ? (selectedWork?.title ?? "作品详情")
+                : activeViewTitle
+          }
+          isDashboardView={dashboardView}
+          isWorkDetailView={workDetailView}
+          isRankingsView={rankingsView}
+          isSharingView={sharingView}
+          selectedCategoryPath={selectedCategoryPath}
+          selectedWorkCategoryPath={selectedWorkCategoryPath}
+          selectedRootCategoryName={selectedRootCategory?.name ?? null}
+          showSharedDimensionNotice={
+            dashboardView &&
+            selectedRootCategory != null &&
+            selectedCategory != null &&
+            selectedRootCategory.id !== selectedCategory.id
+          }
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          onBackToDashboard={() => handleSelectView("dashboard")}
+          onRefresh={() => void controller.refresh()}
+        />
 
         {state.status === "loading" ? (
           <LoadingShell label="正在读取本地资料库" />
@@ -1874,248 +1845,11 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
   );
 }
 
-function createEmptyCategoryModalState(): CategoryModalState {
-  return createRootCategoryModalState();
-}
-
-function createRootCategoryModalState(): CategoryModalState {
-  return {
-    mode: "root",
-    parentCategoryId: null,
-    name: "",
-    dimensionDrafts: [
-      {
-        id: `template-${crypto.randomUUID()}`,
-        name: "剧情",
-        weight: "1",
-      },
-      {
-        id: `template-${crypto.randomUUID()}`,
-        name: "画面",
-        weight: "1",
-      },
-    ],
-  };
-}
-
-function createChildCategoryModalState(
-  parentCategoryId: string,
-): CategoryModalState {
-  return {
-    mode: "child",
-    parentCategoryId,
-    name: "",
-    dimensionDrafts: [],
-  };
-}
-
 interface TagOption {
   value: string;
   count: number;
 }
 
-function collectTagOptions(works: Work[]): TagOption[] {
-  const tagByKey = new Map<string, TagOption>();
-
-  for (const work of works) {
-    for (const tag of work.tags) {
-      const trimmedTag = tag.trim();
-
-      if (trimmedTag.length === 0) {
-        continue;
-      }
-
-      const key = normalizeTagKey(trimmedTag);
-      const current = tagByKey.get(key);
-
-      tagByKey.set(key, {
-        value: current?.value ?? trimmedTag,
-        count: (current?.count ?? 0) + 1,
-      });
-    }
-  }
-
-  return [...tagByKey.values()].sort((left, right) => {
-    if (left.count !== right.count) {
-      return right.count - left.count;
-    }
-
-    return left.value.localeCompare(right.value);
-  });
-}
-
-function matchesTagFilters(tags: string[], filters: string[]): boolean {
-  if (filters.length === 0) {
-    return true;
-  }
-
-  const tagKeys = new Set(tags.map(normalizeTagKey));
-  return filters.every((filter) => tagKeys.has(normalizeTagKey(filter)));
-}
-
-function matchesWorkSearch(work: Work, query: string): boolean {
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-
-  if (normalizedQuery.length === 0) {
-    return true;
-  }
-
-  return [work.title, work.shortReview, work.longReview, ...work.tags].some(
-    (value) => value.toLocaleLowerCase().includes(normalizedQuery),
-  );
-}
-
-function parseTagText(value: string): string[] {
-  const seen = new Set<string>();
-  const tags: string[] = [];
-
-  for (const rawTag of value.split(/[,\n，、;；]+/)) {
-    const tag = rawTag.trim();
-
-    if (tag.length === 0) {
-      continue;
-    }
-
-    const key = normalizeTagKey(tag);
-
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    tags.push(tag);
-  }
-
-  return tags;
-}
-
 function normalizeTagKey(value: string): string {
   return value.trim().toLocaleLowerCase();
-}
-
-function loadExportPreferences(): ExportPreferences {
-  if (typeof window === "undefined") {
-    return { directory: null };
-  }
-
-  try {
-    const raw = window.localStorage.getItem(EXPORT_DIRECTORY_KEY);
-
-    if (!raw) {
-      return { directory: null };
-    }
-
-    const parsed = JSON.parse(raw) as Partial<ExportPreferences>;
-
-    return {
-      directory:
-        typeof parsed.directory === "string" && parsed.directory.length > 0
-          ? parsed.directory
-          : null,
-    };
-  } catch {
-    return { directory: null };
-  }
-}
-
-function storeExportPreferences(preferences: ExportPreferences): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    if (preferences.directory) {
-      window.localStorage.setItem(
-        EXPORT_DIRECTORY_KEY,
-        JSON.stringify(preferences),
-      );
-    } else {
-      window.localStorage.removeItem(EXPORT_DIRECTORY_KEY);
-    }
-  } catch {
-    // Ignore storage failures in constrained browsers.
-  }
-}
-
-function sanitizeExportFileStem(value: string): string {
-  const normalized = Array.from(value.normalize("NFKC"), (character) =>
-    character.charCodeAt(0) < 32 ? "_" : character,
-  ).join("");
-  const sanitized = normalized
-    .replace(/[<>:"/\\|?*]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/[. ]+$/g, "");
-
-  return sanitized.length > 0 ? sanitized : "taste-ledger-export";
-}
-
-function canRasterizeSvgForExport(): boolean {
-  if (
-    typeof window === "undefined" ||
-    typeof document === "undefined" ||
-    typeof Image === "undefined"
-  ) {
-    return false;
-  }
-
-  const canvas = document.createElement("canvas");
-  return canvas.getContext("2d") !== null;
-}
-
-function canCopyImageToClipboard(): boolean {
-  return (
-    typeof navigator !== "undefined" &&
-    typeof navigator.clipboard?.write === "function" &&
-    typeof ClipboardItem !== "undefined"
-  );
-}
-
-function downloadFile(
-  bytes: Uint8Array,
-  fileName: string,
-  mimeType: string,
-): void {
-  if (typeof document === "undefined") {
-    return;
-  }
-
-  if (typeof URL.createObjectURL !== "function") {
-    return;
-  }
-
-  const blobBytes = new Uint8Array(bytes.byteLength);
-  blobBytes.set(bytes);
-  const blob = new Blob([blobBytes.buffer], { type: mimeType });
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = objectUrl;
-  anchor.download = fileName;
-  anchor.rel = "noreferrer";
-  anchor.style.display = "none";
-
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
-}
-
-function LoadingShell({ label }: { label: string }) {
-  return (
-    <div className="center-state">
-      <Loader2 aria-hidden="true" className="spin" size={24} />
-      <p>{label}</p>
-    </div>
-  );
-}
-
-function FatalState({ message }: { message: string }) {
-  return (
-    <div className="center-state error-state" role="alert">
-      <h2>资料库不可用</h2>
-      <p>{message}</p>
-    </div>
-  );
 }
