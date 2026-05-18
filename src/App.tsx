@@ -63,6 +63,7 @@ import {
 import { WorkspaceHeader } from "./components/workspace/WorkspaceHeader";
 import { DashboardView } from "./components/dashboard/DashboardView";
 import { WorkDetailView } from "./components/work/WorkDetailView";
+import { SharingView } from "./components/sharing/SharingView";
 import {
   BookOpen,
   FileText,
@@ -1287,112 +1288,27 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
             )}
           </div>
         ) : sharingView ? (
-          <div className="sharing-grid">
-            <section className="panel export-target-card">
-              <div className="panel-heading">
-                <FileText aria-hidden="true" size={18} />
-                <h3>作品导出</h3>
-              </div>
-              {selectedWork ? (
-                <>
-                  <div className="work-share-preview">
-                    <div className="work-share-preview-cover">
-                      {selectedWorkCoverImageUrl ? (
-                        <img src={selectedWorkCoverImageUrl} alt="" />
-                      ) : (
-                        <span>
-                          {selectedWork.coverImagePath ?? "未设置封面"}
-                        </span>
-                      )}
-                    </div>
-                    <div className="work-share-preview-copy">
-                      <p className="eyebrow">当前作品</p>
-                      <strong>{selectedWork.title}</strong>
-                      <small>
-                        {selectedWork.finalScore === null
-                          ? "未评分"
-                          : `${selectedWork.finalScore} 分`}
-                      </small>
-                      <p>
-                        {selectedWorkCategoryPath ||
-                          selectedCategoryPath ||
-                          selectedCategory?.name}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="button-row">
-                    <button
-                      className="text-button primary"
-                      type="button"
-                      onClick={() => void handleExportWorkShare("cover")}
-                    >
-                      <ImagePlus aria-hidden="true" size={16} />
-                      导出封面图
-                    </button>
-                    <button
-                      className="text-button"
-                      type="button"
-                      onClick={() => void handleExportWorkShare("long")}
-                    >
-                      <FileText aria-hidden="true" size={16} />
-                      导出长图
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <p className="muted">先在仪表盘选择一个作品。</p>
-              )}
-            </section>
-
-            <section className="panel export-target-card">
-              <div className="panel-heading">
-                <Trophy aria-hidden="true" size={18} />
-                <h3>排行导出</h3>
-              </div>
-              <p className="muted">
-                {selectedRootCategory
-                  ? `当前大分类：${selectedRootCategory.name}，${rankingPreviewWorks.length} 个作品。`
-                  : "先选择一个大分类。"}
-              </p>
-              <button
-                className="text-button primary"
-                type="button"
-                onClick={() => void handleExportRankingPreview()}
-                disabled={rankingPreviewWorks.length === 0}
-              >
-                <ImagePlus aria-hidden="true" size={16} />
-                导出排名图
-              </button>
-            </section>
-
-            <section className="panel export-target-card">
-              <div className="panel-heading">
-                <Layers aria-hidden="true" size={18} />
-                <h3>分级导出</h3>
-              </div>
-              <p className="muted">
-                {selectedTierList
-                  ? `当前分级：${selectedTierList.name}，${countTierListWorks(selectedTierList)} 个作品。`
-                  : "先在排行榜里创建并选择一个分级。"}
-              </p>
-              <button
-                className="text-button primary"
-                type="button"
-                onClick={() =>
-                  selectedTierList
-                    ? void handleExportTierListShare({
-                        name: selectedTierList.name,
-                        levels: selectedTierList.levels,
-                      })
-                    : undefined
-                }
-                disabled={!selectedTierList}
-              >
-                <ImagePlus aria-hidden="true" size={16} />
-                导出分级图
-              </button>
-            </section>
-          </div>
+          <SharingView
+            selectedWork={selectedWork}
+            selectedWorkCoverImageUrl={selectedWorkCoverImageUrl}
+            selectedWorkCategoryPath={selectedWorkCategoryPath}
+            selectedCategoryPath={selectedCategoryPath}
+            selectedCategoryName={selectedCategory?.name ?? null}
+            selectedRootCategoryName={selectedRootCategory?.name ?? null}
+            rankingPreviewWorkCount={rankingPreviewWorks.length}
+            selectedTierList={selectedTierList}
+            onExportWorkCover={() => handleExportWorkShare("cover")}
+            onExportWorkLong={() => handleExportWorkShare("long")}
+            onExportRankingPreview={handleExportRankingPreview}
+            onExportTierList={() =>
+              selectedTierList
+                ? handleExportTierListShare({
+                    name: selectedTierList.name,
+                    levels: selectedTierList.levels,
+                  })
+                : undefined
+            }
+          />
         ) : null}
 
         {actionError ? <p className="inline-error">{actionError}</p> : null}
