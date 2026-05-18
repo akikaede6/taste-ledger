@@ -62,30 +62,17 @@ import {
 } from "./components/export/ExportUtils";
 import { WorkspaceHeader } from "./components/workspace/WorkspaceHeader";
 import { DashboardView } from "./components/dashboard/DashboardView";
+import { WorkDetailView } from "./components/work/WorkDetailView";
 import {
-  ArrowLeft,
   BookOpen,
-  ClipboardCopy,
-  ChevronRight,
-  Download,
   FileText,
-  FolderOpen,
-  Filter,
   ImagePlus,
-  Library,
   Layers,
   ListPlus,
-  Loader2,
-  Menu,
   Pencil,
-  Search,
-  RefreshCw,
-  Save,
   Star,
   Trash2,
   Trophy,
-  Tag,
-  X,
 } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { sortTierListsByRecentUpdate } from "./core/library-actions";
@@ -1127,146 +1114,17 @@ function Workspace({ repository }: { repository: LibraryRepository }) {
             onSaveCategoryDimensions={handleSaveCategoryDimensions}
           />
         ) : workDetailView ? (
-          <div className="work-detail-layout">
-            {selectedWork ? (
-              <>
-                <section className="panel work-detail-hero">
-                  <div className="work-detail-cover">
-                    {selectedWorkCoverImageUrl ? (
-                      <img src={selectedWorkCoverImageUrl} alt="" />
-                    ) : (
-                      <span>{selectedWork.coverImagePath ?? "未设置封面"}</span>
-                    )}
-                  </div>
-                  <div className="work-detail-copy">
-                    <div className="work-detail-chips">
-                      <span>
-                        {selectedWorkCategoryPath ||
-                          selectedCategoryPath ||
-                          "未分类"}
-                      </span>
-                      {selectedWork.tags.map((tag) => (
-                        <span key={tag}>{tag}</span>
-                      ))}
-                    </div>
-                    <h3>{selectedWork.title}</h3>
-                    <p>
-                      {selectedWork.shortReview ||
-                        "还没有短评，可以打开编辑补充。"}
-                    </p>
-                    <div className="work-detail-score-row">
-                      <div>
-                        <small>综合评分</small>
-                        <strong>
-                          {selectedWork.finalScore === null
-                            ? "未评分"
-                            : `${selectedWork.finalScore}`}
-                        </strong>
-                      </div>
-                      <div>
-                        <small>评分维度</small>
-                        <strong>{selectedWork.ratingDimensions.length}</strong>
-                      </div>
-                    </div>
-                    <div className="button-row">
-                      <button
-                        className="text-button primary"
-                        type="button"
-                        onClick={() => openEditWorkModal(selectedWork)}
-                      >
-                        <Pencil aria-hidden="true" size={16} />
-                        编辑评测
-                      </button>
-                      <button
-                        className="text-button danger"
-                        type="button"
-                        onClick={() => void handleDeleteWork()}
-                      >
-                        <Trash2 aria-hidden="true" size={16} />
-                        删除作品
-                      </button>
-                      <button
-                        className="text-button"
-                        type="button"
-                        onClick={() => void handleExportWorkShare("cover")}
-                      >
-                        <ImagePlus aria-hidden="true" size={16} />
-                        导出封面图
-                      </button>
-                      <button
-                        className="text-button"
-                        type="button"
-                        onClick={() => void handleExportWorkShare("long")}
-                      >
-                        <FileText aria-hidden="true" size={16} />
-                        导出长图
-                      </button>
-                    </div>
-                  </div>
-                </section>
-
-                <div className="work-detail-grid">
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <BookOpen aria-hidden="true" size={18} />
-                      <h3>长评</h3>
-                    </div>
-                    {selectedWork.longReview.trim() ? (
-                      <article className="work-detail-article">
-                        {selectedWork.longReview
-                          .split(/\r?\n/)
-                          .map((line, index) => (
-                            <p key={`${index}-${line}`}>{line.trim() || " "}</p>
-                          ))}
-                      </article>
-                    ) : (
-                      <p className="muted">还没有长评。</p>
-                    )}
-                  </section>
-
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <Star aria-hidden="true" size={18} />
-                      <h3>维度详情</h3>
-                    </div>
-                    {selectedWork.ratingDimensions.length > 0 ? (
-                      <div className="score-bar-list">
-                        {selectedWork.ratingDimensions.map((dimension) => (
-                          <div className="score-bar-row" key={dimension.id}>
-                            <div>
-                              <span>{dimension.name}</span>
-                              <strong>{dimension.score}</strong>
-                            </div>
-                            <div className="score-bar-track">
-                              <span
-                                style={{
-                                  width: `${Math.max(0, Math.min(100, dimension.score * 10))}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="muted">这个作品还没有评分维度。</p>
-                    )}
-                  </section>
-                </div>
-              </>
-            ) : (
-              <div className="center-state">
-                <BookOpen aria-hidden="true" size={28} />
-                <p>先在仪表盘选择一个作品。</p>
-                <button
-                  className="text-button"
-                  type="button"
-                  onClick={() => handleSelectView("dashboard")}
-                >
-                  返回仪表盘
-                </button>
-              </div>
-            )}
-          </div>
+          <WorkDetailView
+            work={selectedWork}
+            coverImageUrl={selectedWorkCoverImageUrl}
+            categoryPath={selectedWorkCategoryPath}
+            fallbackCategoryPath={selectedCategoryPath}
+            onEditWork={openEditWorkModal}
+            onDeleteWork={handleDeleteWork}
+            onExportCover={() => handleExportWorkShare("cover")}
+            onExportLong={() => handleExportWorkShare("long")}
+            onBackToDashboard={() => handleSelectView("dashboard")}
+          />
         ) : rankingsView ? (
           <div className="ranking-hall">
             <section className="ranking-hero-panel">

@@ -1,4 +1,13 @@
-import { FileText, Filter, ImagePlus, ListPlus, Pencil, Star, Tag, Trash2 } from "lucide-react";
+import {
+  FileText,
+  Filter,
+  ImagePlus,
+  ListPlus,
+  Pencil,
+  Star,
+  Tag,
+  Trash2,
+} from "lucide-react";
 import type { FormEvent } from "react";
 import { getCategoryLineage } from "../../core/category-tree";
 import type {
@@ -268,7 +277,9 @@ export function DashboardView({
             ) : null}
           </>
         ) : (
-          <p className="empty-state">先创建一个大分类，再添加作品、评分和分级。</p>
+          <p className="empty-state">
+            先创建一个大分类，再添加作品、评分和分级。
+          </p>
         )}
       </section>
     </>
